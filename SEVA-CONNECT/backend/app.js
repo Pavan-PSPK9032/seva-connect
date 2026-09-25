@@ -6,6 +6,7 @@
  */
 require('dotenv').config();
 
+const path = require('path');
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -18,6 +19,8 @@ const app = express();
 /* ----------------------------- Security layer ---------------------------- */
 
 app.use(helmet());
+
+app.use('/favicon.ico', express.static(path.join(__dirname, 'public', 'favicon.ico')));
 
 const allowedOrigins = getAllowedOrigins();
 app.use(
