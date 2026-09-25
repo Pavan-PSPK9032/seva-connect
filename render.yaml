@@ -7,7 +7,7 @@ services:
   - type: web
     name: seva-connect-api
     runtime: node
-    rootDir: backend
+    rootDir: SEVA-CONNECT/backend
     plan: free
     buildCommand: npm install
     startCommand: npm start
