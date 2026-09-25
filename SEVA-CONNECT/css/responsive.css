@@ -1,0 +1,86 @@
+/* ============================================================
+   SEVA CONNECT — responsive.css
+   Breakpoints: 1200 / 1024 / 860 / 768 / 640 / 560 / 400
+   ============================================================ */
+
+@media (max-width: 1200px) {
+  .grid-4 { grid-template-columns: repeat(2, 1fr); }
+  .hero-grid { gap: 36px; }
+  .impact-grid { grid-template-columns: repeat(2, 1fr); }
+  .calendar-fill { padding: 20px; }
+}
+
+@media (max-width: 1024px) {
+  .nav-links { display: none; }
+  .hamburger { display: inline-flex; }
+  .hero-grid { grid-template-columns: 1fr; }
+  .journey-card { margin-left: 0; margin-inline: auto; }
+  .hero-cta { margin-bottom: 28px; }
+  .hero-content-right { order: -1; }
+  .hero-stats { grid-template-columns: repeat(3, 1fr); }
+  .hstat + .hstat::before { display: none; }
+  .grid-3 { grid-template-columns: repeat(2, 1fr); }
+  .footer-grid { grid-template-columns: 1fr 1fr; }
+  .podium { grid-template-columns: repeat(3, 1fr); }
+  .section { padding: 72px 0; }
+  .search-box { display: none; }
+  .nav-user .nav-user-name { display: none; }
+}
+
+@media (max-width: 860px) {
+  .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr 1fr; }
+  .hero { padding: 60px 0 50px; }
+  .hero-stats { margin-top: 48px; }
+  .att-row { grid-template-columns: 1fr 1fr; }
+  .form-grid { grid-template-columns: 1fr; }
+  .float-chip { display: none; }
+}
+
+@media (max-width: 768px) {
+  :root { --nav-h: 66px; }
+  .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+  .section-title { font-size: 1.7rem; }
+  .hero-title { font-size: 2.05rem; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); padding: 24px; gap: 18px; }
+  .impact-grid { grid-template-columns: 1fr 1fr; }
+  .cta-banner, .impact-banner { padding: 42px 26px; }
+  .podium { grid-template-columns: 1fr; max-width: 360px; gap: 26px; }
+  .pod-1 { order: 0; }
+  .pod-2 { order: 1; } .pod-3 { order: 2; }
+  .lb-stats { gap: 12px; }
+  .chatbot { right: 16px; left: 16px; width: auto; bottom: 84px; }
+  .chatbot-toggle { right: 16px; bottom: 16px; }
+  .scroll-top { right: 16px; bottom: 78px; }
+  #toast-wrap { left: 16px; right: 16px; max-width: none; }
+  .footer-bottom { justify-content: center; text-align: center; }
+  .navbar .btn-sm { display: none; }
+}
+
+@media (max-width: 640px) {
+  .hero-grid { gap: 28px; }
+  .hero-cta .btn { width: 100%; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+  .impact-grid { grid-template-columns: 1fr; }
+  .footer-grid { grid-template-columns: 1fr; gap: 30px; }
+  .section { padding: 56px 0; }
+  .section-head { margin-bottom: 36px; }
+  .marquee-item { font-size: .82rem; }
+  .journey-card { padding: 26px 20px; }
+  .float-chip { display: none; }
+  .table th, .table td { padding: 11px 12px; }
+  .chat-suggest { display: none; }
+  .card { padding: 20px; }
+  .ring-wrap { width: 140px; height: 140px; }
+}
+
+@media (max-width: 400px) {
+  .hero-stats { grid-template-columns: 1fr 1fr; gap: 14px; }
+  .hstat .num { font-size: 1.3rem; }
+  .brand-tag { display: none; }
+  .social-row { flex-wrap: wrap; }
+  .newsletter-form { flex-direction: column; }
+  .newsletter-form .btn { width: 100%; }
+  .modal-body { padding: 18px; }
+  .modal-head { padding: 16px 18px; }
+  .avatar-xl { width: 72px; height: 72px; }
+}
