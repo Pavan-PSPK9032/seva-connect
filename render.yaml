@@ -1,0 +1,25 @@
+# Render Blueprint — deploys the Express + MongoDB backend to Render.
+# Push this repo to GitHub, then in Render: New -> Blueprint -> pick the repo.
+# The env vars marked `sync: false` are prompted for when the Blueprint runs —
+# paste your real values there (or set them in the service's Environment settings).
+
+services:
+  - type: web
+    name: seva-connect-api
+    runtime: node
+    rootDir: backend
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: 20.11.1
+      - key: MONGODB_URI
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: CLIENT_URL
+        sync: false
