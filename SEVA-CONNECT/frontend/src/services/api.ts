@@ -74,6 +74,16 @@ export async function apiPut<T>(url: string, body: unknown): Promise<ApiResponse
   return res.data;
 }
 
+export async function apiPatch<T>(url: string, body: unknown): Promise<ApiResponse<T>> {
+  const res = await api.patch<ApiResponse<T>>(url, body);
+  return res.data;
+}
+
+export async function apiDelete<T>(url: string): Promise<ApiResponse<T>> {
+  const res = await api.delete<ApiResponse<T>>(url);
+  return res.data;
+}
+
 export function apiErrorMessage(error: unknown, fallback = 'Something went wrong. Please try again.'): string {
   const anyError = error as {
     response?: { data?: Partial<ApiResponse<unknown>> & { errors?: ValidationFieldError[] } };

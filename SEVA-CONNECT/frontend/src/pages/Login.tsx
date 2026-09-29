@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -18,6 +18,7 @@ export default function Login() {
   const { login } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
+  const location = useLocation();
   const [serverError, setServerError] = useState<string | null>(null);
 
   const {
@@ -31,7 +32,8 @@ export default function Login() {
     try {
       const user = await login(values.email, values.password);
       toast('success', `Welcome back, ${user.name.split(' ')[0]}!`);
-      navigate('/');
+      const from = (location.state as { from?: string } | null)?.from;
+      navigate(from || '/', { replace: true });
     } catch (err) {
       const message = apiErrorMessage(err, 'Login failed. Please try again.');
       setServerError(message);

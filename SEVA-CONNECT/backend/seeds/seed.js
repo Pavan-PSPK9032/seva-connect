@@ -42,7 +42,7 @@ async function seed() {
     skills: ['Teaching', 'Healthcare', 'Fundraising'],
     interests: ['Education', 'Child Welfare'],
   });
-  await upsertUser({
+  const ngoUser = await upsertUser({
     name: 'NGO Staff',
     email: 'ngo@sevaconnect.com',
     password: 'ngo456',
@@ -68,6 +68,7 @@ async function seed() {
       causes: ['Education'],
       website: 'https://www.teachforindia.org',
       verified: true,
+      createdBy: ngoUser._id,
     },
     {
       organizationName: 'Goonj',
@@ -77,6 +78,7 @@ async function seed() {
       causes: ['Clothing', 'Disaster Relief'],
       website: 'https://goonj.org',
       verified: true,
+      createdBy: ngoUser._id,
     },
     {
       organizationName: 'The Robin Hood Army',
@@ -86,6 +88,7 @@ async function seed() {
       causes: ['Food', 'Hunger'],
       website: 'https://robinhoodarmy.com',
       verified: true,
+      createdBy: ngoUser._id,
     },
     {
       organizationName: 'SankalpTaru',
@@ -95,6 +98,7 @@ async function seed() {
       causes: ['Environment', 'Climate'],
       website: 'https://sankalptaru.org',
       verified: true,
+      createdBy: ngoUser._id,
     },
     {
       organizationName: 'Uday Foundation',
@@ -104,6 +108,7 @@ async function seed() {
       causes: ['Healthcare', 'Children'],
       website: '',
       verified: false,
+      createdBy: ngoUser._id,
     },
     {
       organizationName: 'Vidya Poshak',
@@ -113,6 +118,7 @@ async function seed() {
       causes: ['Education', 'Livelihood'],
       website: 'https://www.vidyaposhak.org',
       verified: true,
+      createdBy: ngoUser._id,
     },
   ]);
 

@@ -22,6 +22,7 @@ export interface NGO {
   website?: string;
   logo?: string;
   verified: boolean;
+  createdBy?: string;
   createdAt?: string;
 }
 

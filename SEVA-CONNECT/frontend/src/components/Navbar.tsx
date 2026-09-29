@@ -87,11 +87,21 @@ export default function Navbar() {
                     <p className="truncate text-xs capitalize text-slate-500">{user.role}</p>
                   </div>
                   <Link
-                    to="/"
+                    to="/profile"
+                    onClick={() => setProfileOpen(false)}
                     className="flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-navy-600 hover:bg-navy-700/5 dark:text-slate-300 dark:hover:bg-white/10"
                   >
-                    <UserIcon className="h-4 w-4" /> Dashboard
+                    <UserIcon className="h-4 w-4" /> Profile
                   </Link>
+                  {(user.role === 'ngo' || user.role === 'admin') && (
+                    <Link
+                      to="/my-ngo"
+                      onClick={() => setProfileOpen(false)}
+                      className="flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-navy-600 hover:bg-navy-700/5 dark:text-slate-300 dark:hover:bg-white/10"
+                    >
+                      <HeartHandshake className="h-4 w-4" /> Manage NGO
+                    </Link>
+                  )}
                   <button
                     type="button"
                     onClick={logout}

@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
-import { apiPost, apiErrorMessage, clearAuth, getStoredToken, getStoredUser, storeAuth } from '../services/api';
+import { api, apiPost, apiErrorMessage, clearAuth, getStoredToken, getStoredUser, storeAuth } from '../services/api';
 import type { AuthResult, RegisterInput, User } from '../types';
 
 interface AuthContextValue {
@@ -8,6 +8,7 @@ interface AuthContextValue {
   loading: boolean;
   login: (email: string, password: string) => Promise<User>;
   register: (input: RegisterInput) => Promise<User>;
+  refreshUser: () => Promise<User>;
   logout: () => void;
 }
 
@@ -44,12 +45,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   };
 
+  const refreshUser = async (): Promise<User> => {
+    const res = await api.get<{ success: boolean; user: User }>('/users/me');
+    const fresh = res.data.user;
+    storeAuth(getStoredToken() ?? '', fresh);
+    setUser(fresh);
+    return fresh;
+  };
+
   useEffect(() => {
     setLoading(false);
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, token, loading, login, register, logout }}>{children}</AuthContext.Provider>
+    <AuthContext.Provider value={{ user, token, loading, login, register, refreshUser, logout }}>{children}</AuthContext.Provider>
   );
 }
 

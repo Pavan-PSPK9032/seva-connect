@@ -45,6 +45,11 @@ const ngoSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
+  createdBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null,
+  },
   createdAt: {
     type: Date,
     default: Date.now,
@@ -54,5 +59,6 @@ const ngoSchema = new mongoose.Schema({
 ngoSchema.index({ verified: 1 });
 ngoSchema.index({ causes: 1 });
 ngoSchema.index({ organizationName: 1 });
+ngoSchema.index({ createdBy: 1 });
 
 module.exports = mongoose.model('NGO', ngoSchema);
