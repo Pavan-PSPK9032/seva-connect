@@ -53,6 +53,7 @@ app.use('/api/auth', require('./routes/authRoutes'));
 app.use('/api/users', require('./routes/userRoutes'));
 app.use('/api/ngos', require('./routes/ngoRoutes'));
 app.use('/api/events', require('./routes/eventRoutes'));
+app.use('/api/chatbot', require('./routes/chatbotRoutes'));
 
 app.get('/api/health', (req, res) => {
   res.json({

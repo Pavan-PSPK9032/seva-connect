@@ -80,3 +80,24 @@ export interface RegisterInput {
   role?: 'volunteer' | 'ngo';
   skills?: string[];
 }
+
+export type ChatRole = 'user' | 'assistant';
+
+export interface ChatMessage {
+  id: string;
+  role: ChatRole;
+  text: string;
+}
+
+export interface ChatReply {
+  reply: string;
+  /** "ai" when Gemini answered, "fallback" when the local assistant did. */
+  mode: 'ai' | 'fallback';
+  grounded: boolean;
+}
+
+export interface ChatStatus {
+  provider: string;
+  model: string;
+  aiEnabled: boolean;
+}

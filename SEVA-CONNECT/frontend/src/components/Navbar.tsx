@@ -1,17 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
 import { NavLink, Link } from 'react-router-dom';
-import { HeartHandshake, LogOut, Menu, User as UserIcon, X } from 'lucide-react';
+import { HeartHandshake, LogOut, Menu, Sparkles, User as UserIcon, X } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import ThemeToggle from './ThemeToggle';
 import { useAuth } from '../context/AuthContext';
 import { cn } from '../utils/cn';
 
-const LINKS = [
+const LINKS: { to: string; label: string; icon?: LucideIcon }[] = [
   { to: '/', label: 'Home' },
   { to: '/ngos', label: 'NGOs' },
   { to: '/events', label: 'Events' },
   { to: '/about', label: 'About' },
   { to: '/faq', label: 'FAQ' },
   { to: '/contact', label: 'Contact' },
+  { to: '/chatbot', label: 'Seva AI', icon: Sparkles },
 ];
 
 export default function Navbar() {
@@ -57,13 +59,14 @@ export default function Navbar() {
               end={link.to === '/'}
               className={({ isActive }) =>
                 cn(
-                  'rounded-lg px-3.5 py-2 text-sm font-medium transition-colors',
+                  'inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-medium transition-colors',
                   isActive
                     ? 'text-primary-700 dark:text-primary-400'
                     : 'text-navy-600 hover:bg-navy-700/5 hover:text-navy-800 dark:text-slate-300 dark:hover:bg-white/10 dark:hover:text-white'
                 )
               }
             >
+              {link.icon && <link.icon className="h-4 w-4" />}
               {link.label}
             </NavLink>
           ))}
@@ -146,17 +149,18 @@ export default function Navbar() {
                 to={link.to}
                 end={link.to === '/'}
                 onClick={() => setOpen(false)}
-                className={({ isActive }) =>
-                  cn(
-                    'rounded-lg px-3 py-2.5 text-sm font-medium',
-                    isActive
-                      ? 'bg-primary-50 text-primary-700 dark:bg-primary-500/15 dark:text-primary-400'
-                      : 'text-navy-600 hover:bg-navy-700/5 dark:text-slate-300 dark:hover:bg-white/10'
-                  )
-                }
-              >
-                {link.label}
-              </NavLink>
+              className={({ isActive }) =>
+                cn(
+                  'flex items-center gap-1.5 rounded-lg px-3 py-2.5 text-sm font-medium',
+                  isActive
+                    ? 'bg-primary-50 text-primary-700 dark:bg-primary-500/15 dark:text-primary-400'
+                    : 'text-navy-600 hover:bg-navy-700/5 dark:text-slate-300 dark:hover:bg-white/10'
+                )
+              }
+            >
+              {link.icon && <link.icon className="h-4 w-4" />}
+              {link.label}
+            </NavLink>
             ))}
             <div className="mt-2 flex gap-2 border-t border-navy-700/10 pt-3 dark:border-white/10">
               {user ? (

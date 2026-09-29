@@ -15,6 +15,7 @@ const Faq = lazy(() => import('./pages/Faq'));
 const NotFound = lazy(() => import('./pages/NotFound'));
 const Profile = lazy(() => import('./pages/Profile'));
 const MyNGO = lazy(() => import('./pages/MyNGO'));
+const ChatbotPage = lazy(() => import('./pages/Chatbot'));
 
 export default function App() {
   return (
@@ -27,6 +28,7 @@ export default function App() {
         <Route path="/events" element={<ExploreEvents />} />
         <Route path="/contact" element={<Contact />} />
         <Route path="/faq" element={<Faq />} />
+        <Route path="/chatbot" element={<ChatbotPage />} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
         <Route path="/profile" element={<ProtectedRoute />}>

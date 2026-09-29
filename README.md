@@ -11,6 +11,7 @@ volunteering opportunities, events, attendance, certificates, donations and comm
 | ---------- | ----------------------------------------------------------------------------- |
 | Frontend   | React 18, Vite, TypeScript, Tailwind CSS, Framer Motion, React Router, Axios   |
 | Backend    | Node.js, Express, MongoDB Atlas, Mongoose, JWT + bcrypt, Socket.IO             |
+| AI         | Google Gemini (`@google/generative-ai`) with a data-driven local fallback      |
 | Extras     | Recharts (analytics), React Hook Form + Zod (forms), Lucide (icons)            |
 
 ## Project layout
@@ -19,9 +20,10 @@ volunteering opportunities, events, attendance, certificates, donations and comm
 SEVA-CONNECT/
 ├── frontend/            # React + Vite + TypeScript application
 │   ├── src/
-│   │   ├── components/  # Navbar, Footer, cards, skeletons, toasts
+│   │   ├── components/  # Navbar, Footer, cards, Chatbot widget, skeletons, toasts
+│   │   ├── hooks/       # useChatbot (Seva AI chat state)
 │   │   ├── layouts/     # PublicLayout (navbar + footer shell)
-│   │   ├── pages/       # Home, NGOs, Events, Login, Register, About, Contact, FAQ
+│   │   ├── pages/       # Home, NGOs, Events, Chatbot, Login, Register, About, Contact, FAQ
 │   │   ├── context/     # Auth, theme and toast providers (hooks)
 │   │   ├── services/    # Axios API client + interceptors
 │   │   ├── types/       # Shared TypeScript interfaces
@@ -29,10 +31,11 @@ SEVA-CONNECT/
 │   └── vite.config.ts   # /api proxy → localhost:5000
 └── backend/             # Node.js + Express + MongoDB API
     ├── config/          # db.js (Atlas connection), cors.js
-    ├── models/          # User, NGO, Event (more in later phases)
-    ├── controllers/     # auth, ngos, events
-    ├── routes/          # /api/auth, /api/ngos, /api/events
-    ├── middleware/      # JWT auth, role authorization, validation
+    ├── models/          # User, NGO, Event
+    ├── controllers/     # auth, users, ngos, events, chatbot
+    ├── routes/          # /api/auth, /api/users, /api/ngos, /api/events, /api/chatbot
+    ├── services/        # chatbotService.js (grounding), gemini.js (LLM wrapper)
+    ├── middleware/      # JWT auth (protect/authorize/optionalAuth), validation
     ├── sockets/         # Socket.IO (JWT-authenticated real-time layer)
     ├── seeds/           # npm run seed — demo users, NGOs, events
     ├── utils/           # JWT signing
@@ -60,9 +63,15 @@ copy .env.example .env     # then edit .env
 PORT=5000
 MONGODB_URI=mongodb+srv://<user>:<password>@<cluster>/sevaconnect?retryWrites=true&w=majority
 JWT_SECRET=<long random string>
+GEMINI_API_KEY=<Google AI Studio key>
 ```
 
-Optional: `CLIENT_URL=https://yourfrontend.com` (comma-separated allowed origins).
+Optional: `CLIENT_URL=https://yourfrontend.com` (comma-separated allowed origins) and
+`GEMINI_MODEL=gemini-2.0-flash` (defaults to `gemini-2.0-flash`).
+
+`GEMINI_API_KEY` powers the Seva AI chatbot and is **optional** — grab a free key from
+[aistudio.google.com/apikey](https://aistudio.google.com/apikey). Without it the chatbot still works,
+falling back to a built-in assistant that answers from the same live data.
 
 Seed demo data (users, NGOs, events):
 
@@ -112,9 +121,39 @@ npm run preview
 | POST   | /api/auth/login        | Public  | Login (JWT)                     |
 | GET    | /api/ngos              | Public  | NGO directory (search/filter)   |
 | GET    | /api/events            | Public  | Event listing (search/filter)   |
+| GET    | /api/chatbot/status    | Public  | Model + whether Gemini is on    |
+| GET    | /api/chatbot/suggestions | Optional | Starter prompts (personalised) |
+| POST   | /api/chatbot/message   | Optional | One grounded Seva AI chat turn  |
 
-More routes (users, NGO CRUD, events CRUD, registrations, attendance, certificates, donations, notifications,
-reviews, achievements, analytics, admin, AI chatbot) land in subsequent development phases.
+The chatbot routes use `optionalAuth` rather than `protect`: guests can chat, and signed-in visitors
+get answers tailored to their saved skills and interests.
+
+More routes (registrations, attendance, certificates, donations, notifications, reviews, achievements,
+analytics, admin) land in subsequent development phases.
+
+## Seva AI chatbot
+
+A Gemini-powered assistant that answers only from the live listings on the platform.
+
+**Grounding.** `services/chatbotService.js` queries upcoming/ongoing `Event`s and all `NGO`s, ranks
+them against the visitor's message *and* their profile `skills[]` / `interests[]`, and injects the
+top matches as a data block in the system prompt. The model is instructed never to invent events,
+NGOs, dates or availability, and to say when something is not on the platform.
+
+**Fallback.** If `GEMINI_API_KEY` is missing, invalid or the API errors, the service answers with a
+local keyword assistant over the same data. The response's `mode` field is `"ai"` or `"fallback"`,
+and `/api/chatbot/status` reports `aiEnabled` — the UI shows this in the header so the behaviour is
+never silently misleading.
+
+**UI.** The same `ChatSurface` is rendered twice: as a floating launcher in `PublicLayout` (hidden on
+`/chatbot` so the two do not stack) and as the full-page `/chatbot` route. Transcript state lives in
+`sessionStorage`, so moving between the widget and the page keeps the conversation.
+
+Rate limited to 40 messages per 15 minutes on top of the global `/api` limit.
+
+Try it with `demo@sevaconnect.com` / `123456` — that profile has skills *Teaching, Healthcare,
+Fundraising* and interests *Education, Child Welfare*, and asking "which events match my skills?"
+returns education-focused events ranked above the rest.
 
 ## Deployment
 
@@ -133,6 +172,7 @@ The repo ships a `render.yaml` Blueprint.
    - `MONGODB_URI` — your Atlas connection string (**`backend/.env` is gitignored; paste the full URI here**)
    - `JWT_SECRET` — same long random string as local
    - `CLIENT_URL` — your Vercel URL(s), comma-separated, e.g. `https://seva-connect.vercel.app`
+   - `GEMINI_API_KEY` — optional, enables the Seva AI chatbot (omit to use the built-in assistant)
    - `NODE_ENV=production`, `NODE_VERSION=20.11.1` are preset by the Blueprint
 5. Deploy gives you `https://seva-connect-api.onrender.com`. Verify `GET /api/health` returns `{"success":true}`.
 

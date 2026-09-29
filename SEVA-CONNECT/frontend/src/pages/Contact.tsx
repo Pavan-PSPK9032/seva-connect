@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react';
+import { Link } from 'react-router-dom';
 import { Mail, MapPin, MessageCircle, Phone, Send } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 
@@ -50,10 +51,13 @@ export default function Contact() {
             <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary-100 text-primary-700 dark:bg-primary-500/20 dark:text-primary-300">
               <MessageCircle className="h-5 w-5" />
             </span>
-            <div>
+            <div className="min-w-0 flex-1">
               <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Live support</p>
               <p className="mt-0.5 font-medium text-navy-800 dark:text-white">Ask the Seva AI chatbot anytime</p>
             </div>
+            <Link to="/chatbot" className="btn-outline shrink-0">
+              Open
+            </Link>
           </div>
         </div>
 

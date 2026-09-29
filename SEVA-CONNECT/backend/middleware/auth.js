@@ -1,7 +1,9 @@
 /**
  * Authentication & authorization middleware.
- *  - protect:   verifies the Bearer JWT and attaches the requesting user.
- *  - authorize: restricts a route to one or more roles.
+ *  - protect:      verifies the Bearer JWT and attaches the requesting user.
+ *  - authorize:    restricts a route to one or more roles.
+ *  - optionalAuth: attaches the user when a valid token is present, but never
+ *                  rejects anonymous requests.
  */
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
@@ -50,4 +52,21 @@ const authorize =
     next();
   };
 
-module.exports = { protect, authorize };
+// Usage: router.post('/message', optionalAuth, handler)
+// Public routes that behave differently for signed-in visitors (the chatbot).
+async function optionalAuth(req, res, next) {
+  const header = req.headers.authorization || '';
+  const [scheme, token] = header.split(' ');
+
+  if (scheme !== 'Bearer' || !token) return next();
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    req.user = await User.findById(decoded.id);
+  } catch (error) {
+    req.user = undefined;
+  }
+  next();
+}
+
+module.exports = { protect, authorize, optionalAuth };
