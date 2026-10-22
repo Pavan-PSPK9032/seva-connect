@@ -53,6 +53,11 @@ app.use('/api/auth', require('./routes/authRoutes'));
 app.use('/api/users', require('./routes/userRoutes'));
 app.use('/api/ngos', require('./routes/ngoRoutes'));
 app.use('/api/events', require('./routes/eventRoutes'));
+app.use('/api/applications', require('./routes/applicationRoutes'));
+app.use('/api/certificates', require('./routes/certificateRoutes'));
+app.use('/api/notifications', require('./routes/notificationRoutes'));
+app.use('/api/stats', require('./routes/statsRoutes'));
+app.use('/api/admin', require('./routes/adminRoutes'));
 app.use('/api/chatbot', require('./routes/chatbotRoutes'));
 
 app.get('/api/health', (req, res) => {

@@ -64,6 +64,15 @@ export async function apiGet<T>(
   return res.data;
 }
 
+/** GET an endpoint whose `data` is a single object (e.g. /events/:id). */
+export async function apiGetOne<T>(
+  url: string,
+  params?: Record<string, string | number | boolean | undefined>
+): Promise<ApiResponse<T>> {
+  const res = await api.get<ApiResponse<T>>(url, { params });
+  return res.data;
+}
+
 export async function apiPost<T>(url: string, body: unknown): Promise<ApiResponse<T>> {
   const res = await api.post<ApiResponse<T>>(url, body);
   return res.data;

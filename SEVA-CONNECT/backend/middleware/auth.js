@@ -29,6 +29,13 @@ async function protect(req, res, next) {
       });
     }
 
+    if (user.accountStatus === 'suspended') {
+      return res.status(403).json({
+        success: false,
+        message: 'This account is suspended. Please contact support.',
+      });
+    }
+
     req.user = user;
     next();
   } catch (error) {
@@ -62,7 +69,8 @@ async function optionalAuth(req, res, next) {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = await User.findById(decoded.id);
+    const user = await User.findById(decoded.id);
+    req.user = user && user.accountStatus !== 'suspended' ? user : undefined;
   } catch (error) {
     req.user = undefined;
   }

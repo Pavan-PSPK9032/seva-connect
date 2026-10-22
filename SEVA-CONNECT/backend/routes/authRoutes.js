@@ -45,7 +45,20 @@ const loginRules = [
   body('password').notEmpty().withMessage('Password is required'),
 ];
 
+const forgotRules = [
+  body('email').trim().isEmail().withMessage('Please provide a valid email address').normalizeEmail(),
+];
+
+const resetRules = [
+  body('token').trim().isLength({ min: 20 }).withMessage('Invalid or missing reset token'),
+  body('password')
+    .isLength({ min: 6, max: 128 })
+    .withMessage('Password must be between 6 and 128 characters'),
+];
+
 router.post('/register', authLimiter, registerRules, validate, authController.register);
 router.post('/login', authLimiter, loginRules, validate, authController.login);
+router.post('/forgot-password', authLimiter, forgotRules, validate, authController.forgotPassword);
+router.post('/reset-password', authLimiter, resetRules, validate, authController.resetPassword);
 
 module.exports = router;

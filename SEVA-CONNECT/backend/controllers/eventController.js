@@ -76,6 +76,39 @@ async function getEvents(req, res, next) {
   }
 }
 
+// GET /api/events/:id
+async function getEvent(req, res, next) {
+  try {
+    const event = await Event.findById(req.params.id).populate({
+      path: 'ngoId',
+      select: 'organizationName description verified logo location website contactEmail causes',
+    });
+
+    if (!event) {
+      return res.status(404).json({ success: false, message: 'Event not found.' });
+    }
+
+    const doc = shapeEvent(event);
+    if (event.ngoId) {
+      doc.ngo = {
+        _id: event.ngoId._id,
+        organizationName: event.ngoId.organizationName,
+        description: event.ngoId.description,
+        verified: event.ngoId.verified,
+        logo: event.ngoId.logo,
+        location: event.ngoId.location,
+        website: event.ngoId.website,
+        contactEmail: event.ngoId.contactEmail,
+        causes: event.ngoId.causes,
+      };
+    }
+
+    return res.json({ success: true, data: doc });
+  } catch (error) {
+    next(error);
+  }
+}
+
 // GET /api/events/mine
 async function getMyEvents(req, res, next) {
   try {
@@ -114,6 +147,11 @@ async function createEvent(req, res, next) {
       location,
       online: online === true,
       causes: Array.isArray(causes) ? causes.map((c) => String(c).trim()).filter(Boolean) : [],
+      requiredSkills: Array.isArray(req.body.requiredSkills)
+        ? req.body.requiredSkills.map((s) => String(s).trim()).filter(Boolean)
+        : [],
+      eligibility: req.body.eligibility || '',
+      applicationDeadline: req.body.applicationDeadline || null,
       ngoId,
       requiredVolunteers: requiredVolunteers || undefined,
       registeredVolunteers: 0,
@@ -166,6 +204,13 @@ async function updateEvent(req, res, next) {
     if (location !== undefined) event.location = location;
     if (online !== undefined) event.online = online === true;
     if (Array.isArray(causes)) event.causes = causes.map((c) => String(c).trim()).filter(Boolean);
+    if (Array.isArray(req.body.requiredSkills)) {
+      event.requiredSkills = req.body.requiredSkills.map((s) => String(s).trim()).filter(Boolean);
+    }
+    if (req.body.eligibility !== undefined) event.eligibility = req.body.eligibility;
+    if (req.body.applicationDeadline !== undefined) {
+      event.applicationDeadline = req.body.applicationDeadline || null;
+    }
     if (requiredVolunteers !== undefined) event.requiredVolunteers = requiredVolunteers;
     if (status !== undefined) event.status = status;
 
@@ -199,4 +244,4 @@ async function deleteEvent(req, res, next) {
   }
 }
 
-module.exports = { getEvents, getMyEvents, createEvent, updateEvent, deleteEvent };
+module.exports = { getEvents, getEvent, getMyEvents, createEvent, updateEvent, deleteEvent };

@@ -57,6 +57,28 @@ const userSchema = new mongoose.Schema({
     type: String,
     default: '',
   },
+  // Admins can suspend an account; suspended users can authenticate but every
+  // protected request is refused until reactivated.
+  accountStatus: {
+    type: String,
+    enum: ['active', 'suspended'],
+    default: 'active',
+  },
+  notificationPrefs: {
+    inApp: { type: Boolean, default: true },
+    email: { type: Boolean, default: false },
+    reminders: { type: Boolean, default: true },
+  },
+  // Password reset — only the SHA-256 hash of the token is persisted, and it is
+  // never selected by default so it can never leak through a user payload.
+  resetPasswordToken: {
+    type: String,
+    select: false,
+  },
+  resetPasswordExpires: {
+    type: Date,
+    select: false,
+  },
   createdAt: {
     type: Date,
     default: Date.now,

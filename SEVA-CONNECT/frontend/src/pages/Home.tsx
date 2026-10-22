@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
   ArrowRight,
@@ -12,8 +12,8 @@ import {
   Sparkles,
   Users,
 } from 'lucide-react';
-import { apiGet } from '../services/api';
-import type { EventItem, NGO } from '../types';
+import { apiGet, apiGetOne } from '../services/api';
+import type { EventItem, NGO, PlatformStats } from '../types';
 import NGOCard from '../components/NGOCard';
 import EventCard from '../components/EventCard';
 import { GridSkeleton } from '../components/Skeleton';
@@ -31,13 +31,13 @@ const STEPS = [
   },
   {
     Icon: CalendarDays,
-    title: 'Show up & serve',
-    text: 'Register, check in, donate your hours, and build a verified impact history.',
+    title: 'Apply to serve',
+    text: 'Send an application, get confirmed by the NGO, and see your schedule in one dashboard.',
   },
   {
     Icon: Award,
     title: 'Track your impact',
-    text: 'Earn certificates, unlock badges, and climb the community leaderboard.',
+    text: 'Verified hours from completed events build an honest record of your service.',
   },
 ];
 
@@ -45,8 +45,7 @@ export default function Home() {
   const navigate = useNavigate();
   const [ngos, setNgos] = useState<NGO[]>([]);
   const [events, setEvents] = useState<EventItem[]>([]);
-  const [totalNgos, setTotalNgos] = useState(0);
-  const [totalEvents, setTotalEvents] = useState(0);
+  const [platform, setPlatform] = useState<PlatformStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -55,15 +54,15 @@ export default function Home() {
     let active = true;
     (async () => {
       try {
-        const [ngoRes, eventRes] = await Promise.all([
+        const [ngoRes, eventRes, statsRes] = await Promise.all([
           apiGet<NGO>('/ngos', { limit: 3, verified: true, sort: 'name', order: 'asc' }),
           apiGet<EventItem>('/events', { limit: 3, status: 'upcoming' }),
+          apiGetOne<PlatformStats>('/stats/public'),
         ]);
         if (!active) return;
         setNgos(ngoRes.data ?? []);
-        setTotalNgos(ngoRes.pagination?.total ?? 0);
         setEvents(eventRes.data ?? []);
-        setTotalEvents(eventRes.pagination?.total ?? 0);
+        setPlatform(statsRes.data ?? null);
       } catch {
         if (active) setError('We could not reach the server. Is the backend running?');
       } finally {
@@ -80,11 +79,14 @@ export default function Home() {
     navigate(`/events?q=${encodeURIComponent(search.trim())}`);
   };
 
+  const stat = (value: number | undefined, ready: boolean) =>
+    ready && typeof value === 'number' ? new Intl.NumberFormat('en').format(value) : '—';
+
   const stats = [
-    { label: 'Verified NGOs', value: totalNgos || '—' },
-    { label: 'Upcoming events', value: totalEvents || '—' },
-    { label: 'Volunteer hours', value: '12,400+' },
-    { label: 'Volunteers onboard', value: '8,900+' },
+    { label: 'Verified NGOs', value: stat(platform?.verifiedNgos, Boolean(platform)) },
+    { label: 'Active opportunities', value: stat(platform?.activeEvents, Boolean(platform)) },
+    { label: 'Verified volunteer hours', value: stat(platform?.verifiedHours, Boolean(platform)) },
+    { label: 'Volunteers onboard', value: stat(platform?.volunteers, Boolean(platform)) },
   ];
 
   return (
@@ -245,15 +247,15 @@ export default function Home() {
           <Users className="mx-auto h-10 w-10 text-primary-300" />
           <h2 className="mt-4 font-display text-3xl font-bold sm:text-4xl">Ready to make a difference?</h2>
           <p className="mx-auto mt-3 max-w-xl text-primary-100">
-            Join thousands of volunteers turning skills into service — and NGOs into thriving communities.
+            Join volunteers turning skills into service — and help NGOs build thriving communities.
           </p>
           <div className="mt-8 flex flex-wrap justify-center gap-3">
-            <a href="/register" className="btn-accent">
+            <Link to="/register" className="btn-accent">
               Create free account <ArrowRight className="h-4 w-4" />
-            </a>
-            <a href="/ngos" className="btn bg-white/15 text-white hover:bg-white/25">
+            </Link>
+            <Link to="/ngos" className="btn bg-white/15 text-white hover:bg-white/25">
               Explore NGOs
-            </a>
+            </Link>
           </div>
         </div>
       </section>

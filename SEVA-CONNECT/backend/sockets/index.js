@@ -17,6 +17,9 @@ function attachSockets(httpServer) {
     },
   });
 
+  // Exposed so services (notifications) can push without an HTTP request.
+  attachSockets.getIO = () => io;
+
   io.use(async (socket, next) => {
     try {
       const token =

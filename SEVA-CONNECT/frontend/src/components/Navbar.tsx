@@ -1,9 +1,20 @@
 import { useEffect, useRef, useState } from 'react';
-import { NavLink, Link } from 'react-router-dom';
-import { HeartHandshake, LogOut, Menu, Sparkles, User as UserIcon, X } from 'lucide-react';
+import { NavLink, Link, useLocation } from 'react-router-dom';
+import {
+  Bell,
+  HeartHandshake,
+  LayoutDashboard,
+  LogOut,
+  Menu,
+  ShieldCheck,
+  Sparkles,
+  User as UserIcon,
+  X,
+} from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import ThemeToggle from './ThemeToggle';
 import { useAuth } from '../context/AuthContext';
+import { apiGetOne } from '../services/api';
 import { cn } from '../utils/cn';
 
 const LINKS: { to: string; label: string; icon?: LucideIcon }[] = [
@@ -18,8 +29,10 @@ const LINKS: { to: string; label: string; icon?: LucideIcon }[] = [
 
 export default function Navbar() {
   const { user, logout } = useAuth();
+  const location = useLocation();
   const [open, setOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [unread, setUnread] = useState(0);
   const profileRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -29,6 +42,28 @@ export default function Navbar() {
     document.addEventListener('mousedown', onClick);
     return () => document.removeEventListener('mousedown', onClick);
   }, []);
+
+  useEffect(() => {
+    if (!user) {
+      setUnread(0);
+      return;
+    }
+    let active = true;
+    const read = async () => {
+      try {
+        const res = await apiGetOne<{ unreadCount: number }>('/notifications/unread-count');
+        if (active) setUnread(res.data?.unreadCount ?? 0);
+      } catch {
+        /* silent — the bell is non-critical */
+      }
+    };
+    read();
+    const timer = setInterval(read, 60000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [user, location.pathname]);
 
   const initials = user
     ? user.name
@@ -40,7 +75,7 @@ export default function Navbar() {
     : '';
 
   return (
-    <header className="sticky top-0 z-50 border-b border-navy-700/10 bg-white/85 backdrop-blur-lg dark:border-white/10 dark:bg-navy-950/85">
+    <header className="sticky top-0 z-50 border-b border-navy-700/10 bg-white/85 backdrop-blur-lg dark:border-white/10 dark:bg-navy-950/85 print:hidden">
       <nav className="container-x flex h-16 items-center justify-between gap-4">
         <Link to="/" className="flex items-center gap-2.5">
           <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-primary-500 to-primary-700 text-white shadow-sm">
@@ -74,6 +109,20 @@ export default function Navbar() {
 
         <div className="hidden items-center gap-2 lg:flex">
           <ThemeToggle />
+          {user && (
+            <Link
+              to="/notifications"
+              aria-label={`Notifications${unread ? `, ${unread} unread` : ''}`}
+              className="relative flex h-10 w-10 items-center justify-center rounded-full text-navy-600 transition hover:bg-navy-700/5 dark:text-slate-300 dark:hover:bg-white/10"
+            >
+              <Bell className="h-5 w-5" />
+              {unread > 0 && (
+                <span className="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold leading-none text-white">
+                  {unread > 9 ? '9+' : unread}
+                </span>
+              )}
+            </Link>
+          )}
           {user ? (
             <div className="relative" ref={profileRef}>
               <button
@@ -96,6 +145,31 @@ export default function Navbar() {
                   >
                     <UserIcon className="h-4 w-4" /> Profile
                   </Link>
+                  {user.role === 'volunteer' && (
+                    <Link
+                      to="/dashboard"
+                      onClick={() => setProfileOpen(false)}
+                      className="flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-navy-600 hover:bg-navy-700/5 dark:text-slate-300 dark:hover:bg-white/10"
+                    >
+                      <LayoutDashboard className="h-4 w-4" /> Dashboard
+                    </Link>
+                  )}
+                  <Link
+                    to="/notifications"
+                    onClick={() => setProfileOpen(false)}
+                    className="flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-navy-600 hover:bg-navy-700/5 dark:text-slate-300 dark:hover:bg-white/10"
+                  >
+                    <Bell className="h-4 w-4" /> Notifications
+                  </Link>
+                  {user.role === 'admin' && (
+                    <Link
+                      to="/admin"
+                      onClick={() => setProfileOpen(false)}
+                      className="flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-navy-600 hover:bg-navy-700/5 dark:text-slate-300 dark:hover:bg-white/10"
+                    >
+                      <ShieldCheck className="h-4 w-4" /> Admin
+                    </Link>
+                  )}
                   {(user.role === 'ngo' || user.role === 'admin') && (
                     <Link
                       to="/my-ngo"
@@ -128,6 +202,20 @@ export default function Navbar() {
         </div>
 
         <div className="flex items-center gap-2 lg:hidden">
+          {user && (
+            <Link
+              to="/notifications"
+              aria-label={`Notifications${unread ? `, ${unread} unread` : ''}`}
+              className="relative flex h-10 w-10 items-center justify-center rounded-full text-navy-600 dark:text-slate-300"
+            >
+              <Bell className="h-5 w-5" />
+              {unread > 0 && (
+                <span className="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold leading-none text-white">
+                  {unread > 9 ? '9+' : unread}
+                </span>
+              )}
+            </Link>
+          )}
           <ThemeToggle />
           <button
             type="button"
@@ -162,6 +250,28 @@ export default function Navbar() {
               {link.label}
             </NavLink>
             ))}
+            {user && (
+              <div className="mt-1 flex flex-col gap-1 border-t border-navy-700/10 pt-2 dark:border-white/10">
+                {user.role === 'volunteer' && (
+                  <NavLink to="/dashboard" onClick={() => setOpen(false)} className="flex items-center gap-1.5 rounded-lg px-3 py-2.5 text-sm font-medium text-navy-600 hover:bg-navy-700/5 dark:text-slate-300 dark:hover:bg-white/10">
+                    <LayoutDashboard className="h-4 w-4" /> Dashboard
+                  </NavLink>
+                )}
+                <NavLink to="/notifications" onClick={() => setOpen(false)} className="flex items-center gap-1.5 rounded-lg px-3 py-2.5 text-sm font-medium text-navy-600 hover:bg-navy-700/5 dark:text-slate-300 dark:hover:bg-white/10">
+                  <Bell className="h-4 w-4" /> Notifications
+                </NavLink>
+                {user.role === 'admin' && (
+                  <NavLink to="/admin" onClick={() => setOpen(false)} className="flex items-center gap-1.5 rounded-lg px-3 py-2.5 text-sm font-medium text-navy-600 hover:bg-navy-700/5 dark:text-slate-300 dark:hover:bg-white/10">
+                    <ShieldCheck className="h-4 w-4" /> Admin
+                  </NavLink>
+                )}
+                {(user.role === 'ngo' || user.role === 'admin') && (
+                  <NavLink to="/my-ngo" onClick={() => setOpen(false)} className="flex items-center gap-1.5 rounded-lg px-3 py-2.5 text-sm font-medium text-navy-600 hover:bg-navy-700/5 dark:text-slate-300 dark:hover:bg-white/10">
+                    <HeartHandshake className="h-4 w-4" /> Manage NGO
+                  </NavLink>
+                )}
+              </div>
+            )}
             <div className="mt-2 flex gap-2 border-t border-navy-700/10 pt-3 dark:border-white/10">
               {user ? (
                 <button type="button" onClick={() => { logout(); setOpen(false); }} className="btn-outline w-full">

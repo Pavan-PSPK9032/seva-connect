@@ -20,6 +20,13 @@ const eventBody = ({ update = false } = {}) => {
     body('location').trim().notEmpty().withMessage('Event location is required'),
     body('online').optional().isBoolean().withMessage('online must be true/false'),
     body('causes').optional().isArray().withMessage('Causes must be a list'),
+    body('requiredSkills').optional().isArray().withMessage('Required skills must be a list'),
+    body('eligibility').optional().trim().isLength({ max: 500 }).withMessage('Eligibility is too long'),
+    body('applicationDeadline')
+      .optional({ values: 'falsy' })
+      .matches(DATE_RE)
+      .withMessage('Application deadline must be a date (YYYY-MM-DD)')
+      .toDate(),
     body('requiredVolunteers').optional({ values: 'falsy' }).isInt({ min: 1 }).toInt(),
     body('status').optional().isIn(['upcoming', 'ongoing', 'completed', 'cancelled']).withMessage('Invalid status'),
   ];
@@ -36,6 +43,7 @@ const idParam = [param('id').isMongoId().withMessage('Invalid event id')];
 
 router.get('/', eventController.getEvents);
 router.get('/mine', protect, authorize('ngo', 'admin'), eventController.getMyEvents);
+router.get('/:id', idParam, validate, eventController.getEvent);
 router.post('/', protect, authorize('ngo', 'admin'), eventBody(), validate, eventController.createEvent);
 router.patch('/:id', protect, idParam, eventBody({ update: true }), validate, eventController.updateEvent);
 router.delete('/:id', protect, idParam, validate, eventController.deleteEvent);

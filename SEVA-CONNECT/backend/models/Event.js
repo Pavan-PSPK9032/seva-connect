@@ -37,6 +37,23 @@ const eventSchema = new mongoose.Schema({
     type: [String],
     default: [],
   },
+  // Skills the organiser is looking for; surfaced on the opportunity page and
+  // used by the assistant when recommending roles.
+  requiredSkills: {
+    type: [String],
+    default: [],
+  },
+  eligibility: {
+    type: String,
+    trim: true,
+    maxlength: [500, 'Eligibility cannot exceed 500 characters'],
+    default: '',
+  },
+  // Last moment a volunteer may apply. Null means "until the event starts".
+  applicationDeadline: {
+    type: Date,
+    default: null,
+  },
   ngoId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'NGO',

@@ -83,7 +83,12 @@ export default function Login() {
             {errors.email && <p className="mt-1 text-xs text-red-600">{errors.email.message}</p>}
           </div>
           <div>
-            <label htmlFor="password" className="label">Password</label>
+            <div className="flex items-center justify-between">
+              <label htmlFor="password" className="label">Password</label>
+              <Link to="/forgot-password" className="mb-1.5 text-xs font-medium text-primary-600 hover:underline">
+                Forgot password?
+              </Link>
+            </div>
             <input
               id="password"
               type="password"

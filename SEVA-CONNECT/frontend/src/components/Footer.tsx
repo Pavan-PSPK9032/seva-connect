@@ -46,7 +46,7 @@ export default function Footer() {
   ];
 
   return (
-    <footer className="bg-navy-950 text-slate-300">
+    <footer className="bg-navy-950 text-slate-300 print:hidden">
       <div className="container-x grid gap-10 py-14 sm:grid-cols-2 lg:grid-cols-4">
         <div>
           <p className="font-display text-xl font-bold text-white">

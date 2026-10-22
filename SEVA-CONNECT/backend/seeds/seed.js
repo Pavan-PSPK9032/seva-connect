@@ -8,6 +8,8 @@ const mongoose = require('mongoose');
 const User = require('../models/User');
 const NGO = require('../models/NGO');
 const Event = require('../models/Event');
+const Application = require('../models/Application');
+const Certificate = require('../models/Certificate');
 
 const PLACEHOLDER = 'your_mongodb_atlas_connection_string';
 const daysFromNow = (days) => new Date(Date.now() + days * 86400000);
@@ -33,7 +35,7 @@ async function seed() {
     return user;
   };
 
-  await upsertUser({
+  const demoUser = await upsertUser({
     name: 'Demo Volunteer',
     email: 'demo@sevaconnect.com',
     password: '123456',
@@ -58,6 +60,8 @@ async function seed() {
 
   await NGO.deleteMany({});
   await Event.deleteMany({});
+  await Application.deleteMany({});
+  await Certificate.deleteMany({});
 
   const ngos = await NGO.create([
     {
@@ -210,7 +214,40 @@ async function seed() {
     },
   ]);
 
-  console.log(`[SEED] Done: ${ngos.length} NGOs, ${events.length} events`);
+  // Demo application history for the seeded volunteer so dashboards have data.
+  const now = Date.now();
+  const applications = await Application.create([
+    {
+      eventId: events[0]._id,
+      volunteerId: demoUser._id,
+      ngoId: events[0].ngoId,
+      status: 'pending',
+      coverNote: 'I have two years of classroom teaching experience and would love to join.',
+    },
+    {
+      eventId: events[2]._id,
+      volunteerId: demoUser._id,
+      ngoId: events[2].ngoId,
+      status: 'approved',
+      coverNote: 'Available for the full morning and can help with logistics.',
+      decidedAt: new Date(now - 2 * 24 * 60 * 60 * 1000),
+    },
+    {
+      eventId: events[6]._id,
+      volunteerId: demoUser._id,
+      ngoId: events[6].ngoId,
+      status: 'completed',
+      coverNote: 'Happy to help with distribution.',
+      decidedAt: new Date(now - 35 * 24 * 60 * 60 * 1000),
+      completedAt: new Date(now - 30 * 24 * 60 * 60 * 1000),
+      hoursCredited: 5,
+    },
+  ]);
+
+  // Issue the demo certificate for the completed application (idempotent).
+  await require('../services/certificateService').issueForApplication(applications[2]);
+
+  console.log(`[SEED] Done: ${ngos.length} NGOs, ${events.length} events, 3 applications, 1 certificate`);
   await mongoose.disconnect();
 }
 

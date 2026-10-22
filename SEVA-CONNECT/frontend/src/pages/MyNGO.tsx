@@ -5,17 +5,19 @@ import { z } from 'zod';
 import {
   Building2,
   CalendarDays,
+  Check,
   Loader2,
   Pencil,
   Plus,
   Save,
   Trash2,
+  UserRound,
   X,
 } from 'lucide-react';
 import { useAuth, apiErrorMessage } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { apiDelete, apiGet, apiPatch, apiPost } from '../services/api';
-import type { EventItem, NGO } from '../types';
+import type { Application, ApplicationStatus, EventItem, NGO } from '../types';
 import Spinner from '../components/Spinner';
 
 function splitList(value: string | undefined): string[] {
@@ -145,13 +147,30 @@ const eventSchema = z.object({
     (v) => (v === '' || v == null ? undefined : Number(v)),
     z.number().int().min(1, 'At least 1 volunteer').max(10000).optional()
   ),
+  requiredSkills: z.string().trim().optional(),
+  eligibility: z.string().trim().max(500, 'Keep eligibility under 500 characters').optional(),
+  applicationDeadline: z.string().trim().optional(),
   status: z.string().optional(),
   ngoId: z.string().min(1, 'Choose the NGO hosting the event'),
 });
 
 type EventForm = z.infer<typeof eventSchema>;
 
-const emptyEvent = { title: '', description: '', date: '', time: '', location: '', online: false, causes: '', requiredVolunteers: undefined, status: 'upcoming', ngoId: '' };
+const emptyEvent = {
+  title: '',
+  description: '',
+  date: '',
+  time: '',
+  location: '',
+  online: false,
+  causes: '',
+  requiredVolunteers: undefined,
+  requiredSkills: '',
+  eligibility: '',
+  applicationDeadline: '',
+  status: 'upcoming',
+  ngoId: '',
+};
 
 function toEventForm(ev: EventItem): EventForm {
   return {
@@ -163,6 +182,9 @@ function toEventForm(ev: EventItem): EventForm {
     online: Boolean(ev.online),
     causes: (ev.causes || []).join(', '),
     requiredVolunteers: ev.requiredVolunteers,
+    requiredSkills: (ev.requiredSkills || []).join(', '),
+    eligibility: ev.eligibility || '',
+    applicationDeadline: ev.applicationDeadline?.slice(0, 10) || '',
     status: ev.status || 'upcoming',
     ngoId: ev.ngoId || '',
   };
@@ -252,6 +274,24 @@ function EventFormCard({
         </label>
       </div>
 
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div>
+          <label className="label">Required skills (comma separated)</label>
+          <input className="input" {...register('requiredSkills')} placeholder="Teaching, First aid" />
+        </div>
+        <div>
+          <label className="label">Application deadline</label>
+          <input className="input" type="date" {...register('applicationDeadline')} />
+          {errors.applicationDeadline && <p className="mt-1 text-xs text-red-600">{errors.applicationDeadline.message}</p>}
+        </div>
+      </div>
+
+      <div>
+        <label className="label">Eligibility</label>
+        <textarea className="input min-h-20" {...register('eligibility')} placeholder="Who can apply? Any requirements, age limits or training?" />
+        {errors.eligibility && <p className="mt-1 text-xs text-red-600">{errors.eligibility.message}</p>}
+      </div>
+
       <div>
         <label className="label">Hosting NGO</label>
         <select className="input" {...register('ngoId')}>
@@ -274,6 +314,139 @@ function EventFormCard({
   );
 }
 
+/* ------------------------------- Applicants ------------------------------- */
+
+const APP_STATUS_STYLE: Record<ApplicationStatus, string> = {
+  pending: 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300',
+  approved: 'bg-primary-100 text-primary-800 dark:bg-primary-500/15 dark:text-primary-300',
+  rejected: 'bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300',
+  withdrawn: 'bg-slate-100 text-slate-600 dark:bg-white/10 dark:text-slate-300',
+  completed: 'bg-navy-100 text-navy-800 dark:bg-white/10 dark:text-white',
+};
+
+function EventApplicants({ eventId }: { eventId: string }) {
+  const { toast } = useToast();
+  const [items, setItems] = useState<Application[] | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [hours, setHours] = useState<Record<string, string>>({});
+
+  const load = useCallback(async () => {
+    try {
+      const res = await apiGet<Application>(`/applications/event/${eventId}`);
+      setItems(res.data ?? []);
+    } catch (err) {
+      toast('error', 'Could not load applicants', apiErrorMessage(err));
+      setItems([]);
+    }
+  }, [eventId, toast]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const decide = async (application: Application, status: 'approved' | 'rejected' | 'completed') => {
+    setBusyId(application._id);
+    try {
+      await apiPatch(`/applications/${application._id}/status`, {
+        status,
+        ...(status === 'completed' ? { hoursCredited: Number(hours[application._id] ?? 0) || 0 } : {}),
+      });
+      toast(
+        'success',
+        `Application ${status}`,
+        application.volunteer?.name ? `${application.volunteer.name} has been notified.` : undefined
+      );
+      await load();
+    } catch (err) {
+      toast('error', 'Could not update application', apiErrorMessage(err));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  if (!items) {
+    return <p className="px-5 py-4 text-sm text-slate-500">Loading applicants…</p>;
+  }
+  if (items.length === 0) {
+    return <p className="px-5 py-4 text-sm text-slate-500">No applications for this event yet.</p>;
+  }
+
+  return (
+    <ul className="divide-y divide-navy-700/10 dark:divide-white/10">
+      {items.map((application) => {
+        const volunteer = application.volunteer;
+        const busy = busyId === application._id;
+        return (
+          <li key={application._id} className="px-5 py-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-navy-800 dark:text-slate-200">
+                  {volunteer?.name ?? 'Volunteer'}
+                </p>
+                <p className="truncate text-xs text-slate-500">
+                  {volunteer?.email}
+                  {volunteer?.phone ? ` · ${volunteer.phone}` : ''}
+                </p>
+                {volunteer?.skills && volunteer.skills.length > 0 && (
+                  <div className="mt-1.5 flex flex-wrap gap-1">
+                    {volunteer.skills.slice(0, 6).map((skill) => (
+                      <span key={skill} className="rounded-full bg-navy-700/5 px-2 py-0.5 text-[11px] font-medium text-navy-600 dark:bg-white/10 dark:text-slate-300">
+                        {skill}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <span className={`chip capitalize ${APP_STATUS_STYLE[application.status]}`}>{application.status}</span>
+            </div>
+
+            {application.coverNote && (
+              <p className="mt-2 rounded-lg bg-slate-50 p-2.5 text-sm text-slate-600 dark:bg-white/5 dark:text-slate-300">
+                “{application.coverNote}”
+              </p>
+            )}
+
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              {application.status === 'pending' && (
+                <>
+                  <button type="button" onClick={() => decide(application, 'approved')} disabled={busy} className="btn-primary !px-3 !py-1.5 text-sm">
+                    {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Approve
+                  </button>
+                  <button type="button" onClick={() => decide(application, 'rejected')} disabled={busy} className="btn-outline !px-3 !py-1.5 text-sm">
+                    <X className="h-4 w-4" /> Reject
+                  </button>
+                </>
+              )}
+              {application.status === 'approved' && (
+                <>
+                  <label className="flex items-center gap-2 text-sm text-slate-500">
+                    Hours
+                    <input
+                      type="number"
+                      min={0}
+                      max={1000}
+                      value={hours[application._id] ?? ''}
+                      onChange={(e) => setHours((prev) => ({ ...prev, [application._id]: e.target.value }))}
+                      className="input w-20 !py-1.5"
+                      placeholder="0"
+                    />
+                  </label>
+                  <button type="button" onClick={() => decide(application, 'completed')} disabled={busy} className="btn-primary !px-3 !py-1.5 text-sm">
+                    {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Mark completed
+                  </button>
+                </>
+              )}
+              {application.status === 'completed' && application.hoursCredited > 0 && (
+                <span className="text-xs text-slate-500">{application.hoursCredited} verified hour(s)</span>
+              )}
+            </div>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 /* ----------------------------------- Page ----------------------------------- */
 
 export default function MyNGO() {
@@ -285,6 +458,7 @@ export default function MyNGO() {
   const [error, setError] = useState<string | null>(null);
   const [ngoForm, setNgoForm] = useState<(NGOForm & { _id?: string }) | null>(null);
   const [eventForm, setEventForm] = useState<(EventForm & { _id?: string }) | null>(null);
+  const [expandedEvent, setExpandedEvent] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
@@ -343,7 +517,14 @@ export default function MyNGO() {
 
   const saveEvent = async (values: EventForm) => {
     try {
-      const payload = { ...values, causes: splitList(values.causes), online: Boolean(values.online) };
+      const payload = {
+        ...values,
+        causes: splitList(values.causes),
+        requiredSkills: splitList(values.requiredSkills),
+        eligibility: values.eligibility || '',
+        applicationDeadline: values.applicationDeadline || null,
+        online: Boolean(values.online),
+      };
       if (eventForm?._id) {
         await apiPatch<EventItem>(`/events/${eventForm._id}`, payload);
         toast('success', 'Event updated');
@@ -477,22 +658,39 @@ export default function MyNGO() {
 
         <ul className="space-y-3">
           {events.map((ev) => (
-            <li key={ev._id} className="card flex flex-wrap items-center justify-between gap-4 p-5">
-              <div>
-                <p className="font-semibold text-navy-800 dark:text-white">{ev.title}</p>
-                <p className="mt-0.5 text-sm text-slate-500">
-                  {ev.ngoName} · {ev.date?.slice(0, 10)} at {ev.time} · {ev.online ? 'Online' : ev.location}
-                </p>
+            <li key={ev._id} className="card overflow-hidden p-0">
+              <div className="flex flex-wrap items-center justify-between gap-4 p-5">
+                <div>
+                  <p className="font-semibold text-navy-800 dark:text-white">{ev.title}</p>
+                  <p className="mt-0.5 text-sm text-slate-500">
+                    {ev.ngoName} · {ev.date?.slice(0, 10)} at {ev.time} · {ev.online ? 'Online' : ev.location}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-400">
+                    {ev.registeredVolunteers ?? 0} of {ev.requiredVolunteers ?? 0} seats filled
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setExpandedEvent(expandedEvent === ev._id ? null : ev._id)}
+                    className="btn-ghost !px-3 !py-2 text-sm"
+                  >
+                    <UserRound className="h-4 w-4" /> Applicants
+                  </button>
+                  <span className="rounded-full bg-navy-700/5 px-2.5 py-1 text-xs font-semibold capitalize text-navy-600 dark:bg-white/10 dark:text-slate-300">{ev.status}</span>
+                  <button type="button" onClick={() => setEventForm({ ...toEventForm(ev), _id: ev._id })} className="btn-outline !px-3 !py-2" title="Edit">
+                    <Pencil className="h-4 w-4" />
+                  </button>
+                  <button type="button" onClick={() => void deleteEvent(ev)} className="btn-outline !px-3 !py-2 !text-red-600" title="Delete">
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <span className="rounded-full bg-navy-700/5 px-2.5 py-1 text-xs font-semibold capitalize text-navy-600 dark:bg-white/10 dark:text-slate-300">{ev.status}</span>
-                <button type="button" onClick={() => setEventForm({ ...toEventForm(ev), _id: ev._id })} className="btn-outline !px-3 !py-2" title="Edit">
-                  <Pencil className="h-4 w-4" />
-                </button>
-                <button type="button" onClick={() => void deleteEvent(ev)} className="btn-outline !px-3 !py-2 !text-red-600" title="Delete">
-                  <Trash2 className="h-4 w-4" />
-                </button>
-              </div>
+              {expandedEvent === ev._id && (
+                <div className="border-t border-navy-700/10 bg-slate-50/50 dark:border-white/10 dark:bg-white/[0.02]">
+                  <EventApplicants eventId={ev._id} />
+                </div>
+              )}
             </li>
           ))}
         </ul>
