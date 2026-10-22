@@ -5,33 +5,54 @@
 const crypto = require('crypto');
 const User = require('../models/User');
 const signToken = require('../utils/generateToken');
+const { normalizeEmail } = require('../utils/email');
 const { sendMail } = require('../services/mailer');
+
+const DUPLICATE_EMAIL_MESSAGE =
+  'An account with this email already exists. Please log in or reset your password.';
 
 // POST /api/auth/register
 // Inputs are pre-validated by express-validator in the route (email format,
 // password length, role whitelist volunteer/ngo only — admin is never public).
 async function register(req, res, next) {
   try {
-    const { name, email, password, phone, skills, interests, profileImage } = req.body;
+    const { name, password, phone, skills, interests, profileImage } = req.body;
+    const email = normalizeEmail(req.body.email);
 
-    const existing = await User.findOne({ email: email.toLowerCase() });
+    const existing = await User.findOne({ email });
     if (existing) {
       return res.status(409).json({
         success: false,
-        message: 'An account with this email already exists. Please log in.',
+        code: 'EMAIL_TAKEN',
+        message: DUPLICATE_EMAIL_MESSAGE,
       });
     }
 
-    const user = await User.create({
-      name,
-      email,
-      password,
-      role: req.body.role || 'volunteer',
-      phone: phone || '',
-      skills: Array.isArray(skills) ? skills.map((s) => String(s).trim()).filter(Boolean) : [],
-      interests: Array.isArray(interests) ? interests.map((s) => String(s).trim()).filter(Boolean) : [],
-      profileImage: profileImage || '',
-    });
+    let user;
+    try {
+      user = await User.create({
+        name,
+        email,
+        password,
+        role: req.body.role || 'volunteer',
+        phone: phone || '',
+        skills: Array.isArray(skills) ? skills.map((s) => String(s).trim()).filter(Boolean) : [],
+        interests: Array.isArray(interests) ? interests.map((s) => String(s).trim()).filter(Boolean) : [],
+        profileImage: profileImage || '',
+      });
+    } catch (error) {
+      // Two simultaneous requests can both pass the check above; the unique
+      // email index then rejects the second insert. Surface it as the same
+      // clear 409 instead of a generic 500.
+      if (error && error.code === 11000) {
+        return res.status(409).json({
+          success: false,
+          code: 'EMAIL_TAKEN',
+          message: DUPLICATE_EMAIL_MESSAGE,
+        });
+      }
+      throw error;
+    }
 
     const token = signToken({ id: user._id });
 
@@ -49,9 +70,10 @@ async function register(req, res, next) {
 // POST /api/auth/login
 async function login(req, res, next) {
   try {
-    const { email, password } = req.body;
+    const { password } = req.body;
+    const email = normalizeEmail(req.body.email);
 
-    const user = await User.findOne({ email: email.toLowerCase() }).select('+password');
+    const user = await User.findOne({ email }).select('+password');
     // Single generic message so we never reveal whether an email exists.
     if (!user || !(await user.comparePassword(password))) {
       return res.status(401).json({
@@ -88,7 +110,7 @@ async function forgotPassword(req, res, next) {
   };
 
   try {
-    const email = String(req.body.email || '').toLowerCase();
+    const email = normalizeEmail(req.body.email);
     const user = await User.findOne({ email });
 
     // Always answer identically so the endpoint cannot be used to enumerate accounts.

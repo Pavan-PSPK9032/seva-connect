@@ -4,6 +4,7 @@
  */
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
+const { normalizeEmail } = require('../utils/email');
 
 const EMAIL_RE = /^\S+@\S+\.\S+$/;
 const PHONE_RE = /^\+?[\d\s\-()]{7,20}$/;
@@ -21,6 +22,7 @@ const userSchema = new mongoose.Schema({
     unique: true,
     lowercase: true,
     trim: true,
+    set: normalizeEmail,
     match: [EMAIL_RE, 'Please provide a valid email address'],
   },
   password: {

@@ -29,6 +29,7 @@ export default function Register() {
   const { toast } = useToast();
   const navigate = useNavigate();
   const [serverError, setServerError] = useState<string | null>(null);
+  const [conflict, setConflict] = useState(false);
 
   const {
     register,
@@ -41,6 +42,7 @@ export default function Register() {
 
   const onSubmit = async (values: RegisterForm) => {
     setServerError(null);
+    setConflict(false);
     const skills = values.skills
       ? values.skills.split(',').map((s) => s.trim()).filter(Boolean)
       : undefined;
@@ -57,6 +59,8 @@ export default function Register() {
       navigate('/');
     } catch (err) {
       const message = apiErrorMessage(err, 'Registration failed. Please try again.');
+      const status = (err as { response?: { status?: number } })?.response?.status;
+      setConflict(status === 409);
       setServerError(message);
       toast('error', 'Registration failed', message);
     }
@@ -75,7 +79,17 @@ export default function Register() {
 
         {serverError && (
           <div className="mt-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300">
-            {serverError}
+            <p>{serverError}</p>
+            {conflict && (
+              <p className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs font-semibold">
+                <Link to="/login" className="underline underline-offset-2">
+                  Log in instead
+                </Link>
+                <Link to="/forgot-password" className="underline underline-offset-2">
+                  Reset your password
+                </Link>
+              </p>
+            )}
           </div>
         )}
 

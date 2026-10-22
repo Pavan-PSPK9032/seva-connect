@@ -86,6 +86,34 @@ app.use((req, res) => {
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
   console.error(`[ERR] ${req.method} ${req.originalUrl}:`, err.message);
+
+  // Unique-index violations (including registration races that slip past the
+  // pre-check) must be a clear 409, never a generic 500.
+  if (err.code === 11000) {
+    const fields = Object.keys(err.keyPattern || err.keyValue || {});
+    const message = fields.includes('email')
+      ? 'An account with this email already exists. Please log in or reset your password.'
+      : 'A record with these details already exists.';
+    return res.status(409).json({ success: false, code: 'DUPLICATE_KEY', message });
+  }
+
+  // Body-parser rejects malformed JSON before any route runs.
+  if (err.type === 'entity.parse.failed') {
+    return res.status(400).json({
+      success: false,
+      code: 'MALFORMED_JSON',
+      message: 'Malformed JSON in the request body. Please check the data and try again.',
+    });
+  }
+
+  if (err.type === 'entity.too.large') {
+    return res.status(413).json({
+      success: false,
+      code: 'PAYLOAD_TOO_LARGE',
+      message: 'Request body is too large.',
+    });
+  }
+
   if (err.name === 'ValidationError') {
     return res.status(400).json({
       success: false,
@@ -93,6 +121,14 @@ app.use((err, req, res, next) => {
       errors: Object.values(err.errors).map((e) => ({ field: e.path, message: e.message })),
     });
   }
+
+  if (err.name === 'CastError') {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid identifier supplied.',
+    });
+  }
+
   res.status(err.status || 500).json({
     success: false,
     message: err.status === 404 ? err.message : 'Internal server error. Please try again later.',
