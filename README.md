@@ -17,31 +17,50 @@ certificates.
 
 **Volunteers**
 
-- Browse verified NGOs and upcoming/ongoing/completed events with search and filters.
-- Full opportunity page: capacity, required skills, eligibility, application deadline, organiser.
+- Browse verified NGOs and upcoming/ongoing/completed events with search plus filters for cause,
+  skill, online roles, availability of seats, and sorting (soonest, newest, closing soon, popular).
+- Full opportunity page: capacity, required skills, eligibility, application deadline, organiser,
+  and related opportunities sharing a cause.
 - Apply with an optional cover note, withdraw, and re-apply (a withdrawn application is reused).
-- Personal dashboard with application statuses and verified hours.
-- In-app notifications with per-user preferences.
+- Save opportunities for later; saved events appear on the dashboard.
+- Personalised recommendations ranked only from the volunteer's saved skills, interests and
+  preferred causes (no invented matches, with transparent match reasons).
+- Personal dashboard with application statuses, verified hours, saved events and recommendations.
+- Rich profile: location, availability, preferred causes and an opt-out from the public leaderboard.
+- In-app notifications with per-user preferences (email copies when SMTP is configured and enabled).
 - Printable certificate of volunteering for every completed, verified event, publicly verifiable
   by certificate ID.
+
+**Public pages**
+
+- How it works (volunteer and NGO lifecycles), Impact analytics (live charts by month, cause,
+  location, top NGOs), Volunteer leaderboard (week/month/all, verifier-hours scoring), Privacy
+  policy and Terms of use.
 
 **NGOs**
 
 - Create and manage organisations and events (capacity, skills, eligibility, deadline).
+- Request verification for an organisation, with an optional supporting note.
 - Review applicants per event, approve/reject, and mark participation completed with verified hours.
 - Seat capacity is enforced atomically, so concurrent approvals cannot oversubscribe an event.
-- Applicants receive notifications on every decision.
+- Applicants receive notifications on every decision; changing a date/time/location or cancelling
+  notifies affected applicants and releases seats.
+- Public organisation profile page at `/ngos/:id` with live stats.
 
 **Administrators**
 
 - Platform overview computed from live records.
 - Search users, suspend/reactivate accounts (admins cannot be suspended).
-- Verify or revoke verification of organisations.
-- Audit log of sensitive actions (decisions, suspensions, verification changes).
+- Verify or revoke verification of organisations; filter by verification-requested.
+- Moderate opportunities (set status; cancelling closes applications and notifies volunteers).
+- Review applications across the platform.
+- Export users, organisations, opportunities or applications as CSV.
+- Audit log of sensitive actions (decisions, suspensions, verification changes, exports).
 
 **Public**
 
-- Honest impact statistics pulled from the database — no hardcoded numbers.
+- Honest impact statistics and analytics pulled from the database — no hardcoded numbers.
+- Volunteer leaderboard based solely on completed activities and verified hours.
 - "Seva AI" assistant grounded in live listings.
 - Certificate verification page.
 
@@ -65,8 +84,9 @@ SEVA-CONNECT/
       components/              Navbar (notification bell), Footer, cards, Chatbot, skeletons
       hooks/                   useChatbot (Seva AI chat state)
       layouts/                 PublicLayout (navbar + footer shell, document titles)
-      pages/                   Home, NGOs, Events, EventDetail, Dashboard, Notifications,
-                               MyNGO, Admin, Profile, CertificateView, auth pages, Chatbot
+      pages/                   Home, NGOs, NGOProfile, Events, EventDetail, HowItWorks, Impact,
+                               Leaderboard, Privacy, Terms, Dashboard, Notifications, MyNGO,
+                               Admin, Profile, CertificateView, auth pages, Chatbot
       context/                 Auth, theme and toast providers
       services/                Axios API client + interceptors
       types/                   Shared TypeScript interfaces
@@ -171,10 +191,19 @@ npm run preview
 | POST   | /api/auth/forgot-password             | Public          | Send a reset link (generic response)     |
 | POST   | /api/auth/reset-password              | Public          | Consume token, set new password          |
 | GET    | /api/stats/public                     | Public          | Live impact statistics                   |
+| GET    | /api/stats/impact                     | Public          | Participation analytics                  |
+| GET    | /api/stats/leaderboard                | Public          | Volunteer ranking (period, limit)        |
 | GET    | /api/ngos                             | Public          | NGO directory (search/filter)            |
-| GET    | /api/ngos/:id                         | Public          | NGO detail                               |
-| GET    | /api/events                           | Public          | Event listing (search/filter)            |
-| GET    | /api/events/:id                       | Public          | Event detail + organiser                 |
+| GET    | /api/ngos/:id                         | Public          | NGO detail + events + stats              |
+| PATCH  | /api/ngos/:id/request-verification    | NGO owner/admin | Request verification (optional note)     |
+| GET    | /api/events                           | Public          | Event listing (search/filter/sort)       |
+| GET    | /api/events/recommended               | Volunteer       | Personalised recommendations             |
+| GET    | /api/events/:id                       | Public          | Event detail + organiser + related       |
+| GET    | /api/users/me                         | Any signed-in   | Current profile                          |
+| PATCH  | /api/users/me                         | Any signed-in   | Update profile fields                    |
+| GET    | /api/users/me/saved-events            | Any signed-in   | Bookmarked opportunities                 |
+| POST   | /api/users/me/saved-events/:eventId   | Any signed-in   | Save an opportunity                      |
+| DELETE | /api/users/me/saved-events/:eventId   | Any signed-in   | Remove a saved opportunity               |
 | POST   | /api/applications                     | Volunteer       | Apply (optional cover note)              |
 | GET    | /api/applications/mine                | Volunteer       | Own applications + summary               |
 | PATCH  | /api/applications/:id/withdraw        | Volunteer       | Withdraw; releases the seat              |
@@ -193,6 +222,10 @@ npm run preview
 | PATCH  | /api/admin/users/:id/status           | Admin           | Suspend / reactivate                     |
 | GET    | /api/admin/ngos                       | Admin           | All organisations                        |
 | PATCH  | /api/admin/ngos/:id/verify            | Admin           | Verify / revoke                          |
+| GET    | /api/admin/events                     | Admin           | Opportunities (moderation)               |
+| PATCH  | /api/admin/events/:id/status          | Admin           | Set opportunity status                   |
+| GET    | /api/admin/applications               | Admin           | Applications across platform             |
+| GET    | /api/admin/export                     | Admin           | CSV export (users/ngos/events/apps)      |
 | GET    | /api/admin/audit                      | Admin           | Audit log                                |
 | GET    | /api/chatbot/status                   | Public          | Model + whether Gemini is on             |
 | GET    | /api/chatbot/suggestions              | Optional        | Starter prompts (personalised)           |
@@ -208,6 +241,10 @@ Responses follow `{ success, message?, data?, ... }`. Validation failures return
   a conditional atomic update (`$lt` capacity), and withdrawal decrements it clamped at zero.
 - Completed applications snapshot names into a `Certificate` so the certificate stays stable if an
   event or organisation is renamed.
+- `User` carries `location`, `availability`, `preferredCauses`, `savedEvents[]` and
+  `leaderboardOptOut`. Only whitelisted fields can be changed via `PATCH /api/users/me`.
+- `NGO` carries `verificationRequested`, `verificationNote` and `verifiedAt`.
+- `Application` statuses include `cancelled`, used when an event is cancelled by its NGO or an admin.
 - Suspended users can authenticate but every protected request returns `403`; `optionalAuth` treats
   them as anonymous.
 
@@ -240,6 +277,10 @@ Against the seeded database (backend on an alternate port):
   rejected, new password accepted.
 - 15 checks: certificate verification, case-insensitivity, unknown code, issuance on completion,
   hour snapshot, ownership listing.
+- 37 checks: public impact analytics, leaderboard ranking, discovery filters/sort, personalised
+  recommendations (volunteer-only), NGO detail with stats, event `related`, saved-events lifecycle,
+  profile updates and self-role guard, admin events/applications/CSV export, admin status moderation,
+  NGO verification request and requested filter.
 - `npm run build` (TypeScript + Vite) passes with no errors.
 
 ## Deployment

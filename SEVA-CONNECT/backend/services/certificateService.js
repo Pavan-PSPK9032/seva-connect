@@ -27,7 +27,7 @@ async function issueForApplication(application) {
   if (!event || !ngo || !volunteer) return null;
 
   try {
-    return await Certificate.create({
+    const certificate = await Certificate.create({
       certificateId: newCertificateId(),
       applicationId: application._id,
       volunteerId: volunteer._id,
@@ -39,6 +39,18 @@ async function issueForApplication(application) {
       eventDate: event.date,
       hours: application.hoursCredited || 0,
     });
+
+    const { notify } = require('./notificationService');
+    await notify({
+      recipient: volunteer._id,
+      type: 'certificate_ready',
+      title: 'Your certificate is ready',
+      message: `Your certificate for "${event.title}" is available to download and share.`,
+      link: `/certificates/${certificate.certificateId}`,
+      meta: { certificateId: certificate.certificateId, eventId: String(event._id) },
+    });
+
+    return certificate;
   } catch (error) {
     // Unique index race — another request issued it first.
     if (error && error.code === 11000) {

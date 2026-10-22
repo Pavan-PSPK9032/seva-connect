@@ -1,15 +1,19 @@
 import { useCallback, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import {
+  BadgeCheck,
   Building2,
   CalendarDays,
   Check,
+  ExternalLink,
   Loader2,
   Pencil,
   Plus,
   Save,
+  Send,
   Trash2,
   UserRound,
   X,
@@ -186,7 +190,7 @@ function toEventForm(ev: EventItem): EventForm {
     eligibility: ev.eligibility || '',
     applicationDeadline: ev.applicationDeadline?.slice(0, 10) || '',
     status: ev.status || 'upcoming',
-    ngoId: ev.ngoId || '',
+    ngoId: typeof ev.ngoId === 'string' ? ev.ngoId : ev.ngoId?._id || '',
   };
 }
 
@@ -322,6 +326,7 @@ const APP_STATUS_STYLE: Record<ApplicationStatus, string> = {
   rejected: 'bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300',
   withdrawn: 'bg-slate-100 text-slate-600 dark:bg-white/10 dark:text-slate-300',
   completed: 'bg-navy-100 text-navy-800 dark:bg-white/10 dark:text-white',
+  cancelled: 'bg-slate-100 text-slate-500 dark:bg-white/10 dark:text-slate-400',
 };
 
 function EventApplicants({ eventId }: { eventId: string }) {
@@ -459,6 +464,9 @@ export default function MyNGO() {
   const [ngoForm, setNgoForm] = useState<(NGOForm & { _id?: string }) | null>(null);
   const [eventForm, setEventForm] = useState<(EventForm & { _id?: string }) | null>(null);
   const [expandedEvent, setExpandedEvent] = useState<string | null>(null);
+  const [verifyingId, setVerifyingId] = useState<string | null>(null);
+  const [verificationNote, setVerificationNote] = useState('');
+  const [verificationBusy, setVerificationBusy] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
@@ -512,6 +520,26 @@ export default function MyNGO() {
       await load();
     } catch (err) {
       toast('error', 'Delete failed', apiErrorMessage(err, 'Could not delete the NGO.'));
+    }
+  };
+
+  const startVerification = (ngo: NGO) => {
+    setVerifyingId(ngo._id);
+    setVerificationNote(ngo.verificationNote || '');
+  };
+
+  const submitVerification = async (ngo: NGO) => {
+    setVerificationBusy(true);
+    try {
+      await apiPatch(`/ngos/${ngo._id}/request-verification`, { note: verificationNote.trim() });
+      toast('success', 'Verification requested', 'An administrator will review your organisation.');
+      setVerifyingId(null);
+      setVerificationNote('');
+      await load();
+    } catch (err) {
+      toast('error', 'Could not request verification', apiErrorMessage(err));
+    } finally {
+      setVerificationBusy(false);
     }
   };
 
@@ -613,14 +641,29 @@ export default function MyNGO() {
                 </div>
               </div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <span
                 className={ngo.verified
                   ? 'rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300'
-                  : 'rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700 dark:bg-amber-500/10 dark:text-amber-300'}
+                  : ngo.verificationRequested
+                    ? 'rounded-full bg-sky-50 px-2.5 py-1 text-xs font-semibold text-sky-700 dark:bg-sky-500/10 dark:text-sky-300'
+                    : 'rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700 dark:bg-amber-500/10 dark:text-amber-300'}
               >
-                {ngo.verified ? 'Verified' : 'Pending review'}
+                {ngo.verified ? 'Verified' : ngo.verificationRequested ? 'Verification requested' : 'Pending review'}
               </span>
+              <Link to={`/ngos/${ngo._id}`} className="btn-outline !px-3 !py-2" title="View public page">
+                <ExternalLink className="h-4 w-4" />
+              </Link>
+              {!ngo.verified && (
+                <button
+                  type="button"
+                  onClick={() => startVerification(ngo)}
+                  className="btn-outline !px-3 !py-2"
+                  title={ngo.verificationRequested ? 'Update verification request' : 'Request verification'}
+                >
+                  <BadgeCheck className="h-4 w-4" /> {ngo.verificationRequested ? 'Update request' : 'Request verification'}
+                </button>
+              )}
               <button type="button" onClick={() => setNgoForm({ ...toNgoForm(ngo), _id: ngo._id })} className="btn-outline !px-3 !py-2" title="Edit">
                 <Pencil className="h-4 w-4" />
               </button>
@@ -628,6 +671,34 @@ export default function MyNGO() {
                 <Trash2 className="h-4 w-4" />
               </button>
             </div>
+
+            {verifyingId === ngo._id && (
+              <div className="w-full rounded-xl border border-primary-500/30 bg-primary-50/50 p-4 dark:bg-primary-500/5">
+                <label htmlFor={`verification-${ngo._id}`} className="label">
+                  Verification information (optional)
+                </label>
+                <textarea
+                  id={`verification-${ngo._id}`}
+                  value={verificationNote}
+                  onChange={(e) => setVerificationNote(e.target.value)}
+                  maxLength={1000}
+                  className="input min-h-24"
+                  placeholder="Registration number, website, references, or anything that helps an administrator verify your organisation."
+                />
+                <div className="mt-3 flex justify-end gap-2">
+                  <button type="button" onClick={() => setVerifyingId(null)} className="btn-ghost">Cancel</button>
+                  <button
+                    type="button"
+                    onClick={() => void submitVerification(ngo)}
+                    disabled={verificationBusy}
+                    className="btn-primary"
+                  >
+                    {verificationBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                    Send request
+                  </button>
+                </div>
+              </div>
+            )}
           </article>
         ))}
       </section>

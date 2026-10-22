@@ -21,8 +21,10 @@ const LINKS: { to: string; label: string; icon?: LucideIcon }[] = [
   { to: '/', label: 'Home' },
   { to: '/ngos', label: 'NGOs' },
   { to: '/events', label: 'Events' },
+  { to: '/how-it-works', label: 'How it works' },
+  { to: '/impact', label: 'Impact' },
+  { to: '/leaderboard', label: 'Leaderboard' },
   { to: '/about', label: 'About' },
-  { to: '/faq', label: 'FAQ' },
   { to: '/contact', label: 'Contact' },
   { to: '/chatbot', label: 'Seva AI', icon: Sparkles },
 ];

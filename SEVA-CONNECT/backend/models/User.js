@@ -50,6 +50,34 @@ const userSchema = new mongoose.Schema({
     type: [String],
     default: [],
   },
+  // Volunteer discovery preferences. Optional so existing accounts keep working.
+  location: {
+    type: String,
+    trim: true,
+    maxlength: [100, 'Location cannot exceed 100 characters'],
+    default: '',
+  },
+  availability: {
+    type: String,
+    trim: true,
+    maxlength: [120, 'Availability cannot exceed 120 characters'],
+    default: '',
+  },
+  preferredCauses: {
+    type: [String],
+    default: [],
+  },
+  savedEvents: [
+    {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Event',
+    },
+  ],
+  // Let volunteers hide themselves from the public impact leaderboard.
+  leaderboardOptOut: {
+    type: Boolean,
+    default: false,
+  },
   role: {
     type: String,
     enum: ['volunteer', 'admin', 'ngo'],

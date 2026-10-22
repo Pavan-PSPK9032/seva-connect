@@ -5,7 +5,7 @@ import type { NGO } from '../types';
 export default function NGOCard({ ngo }: { ngo: NGO }) {
   return (
     <Link
-      to={`/ngos?id=${ngo._id}`}
+      to={`/ngos/${ngo._id}`}
       className="card group flex h-full flex-col p-6 transition-all hover:-translate-y-1 hover:shadow-card"
     >
       <div className="flex items-start justify-between gap-3">

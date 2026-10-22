@@ -7,10 +7,11 @@
  *   pending -> approved -> completed
  *   pending -> rejected
  *   pending|approved -> withdrawn
+ *   pending|approved -> cancelled (the event was cancelled)
  */
 const mongoose = require('mongoose');
 
-const STATUSES = ['pending', 'approved', 'rejected', 'withdrawn', 'completed'];
+const STATUSES = ['pending', 'approved', 'rejected', 'withdrawn', 'completed', 'cancelled'];
 
 const applicationSchema = new mongoose.Schema({
   eventId: {

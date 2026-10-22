@@ -13,6 +13,9 @@ router.use(protect, authorize('admin'));
 router.get('/overview', adminController.overview);
 router.get('/users', adminController.listUsers);
 router.get('/ngos', adminController.listNGOs);
+router.get('/events', adminController.listEvents);
+router.get('/applications', adminController.listApplications);
+router.get('/export', adminController.exportCsv);
 router.get('/audit', adminController.listAudit);
 
 router.patch(
@@ -29,6 +32,16 @@ router.patch(
   body('verified').isBoolean().withMessage('verified must be true or false').toBoolean(),
   validate,
   adminController.setNGOVerified
+);
+
+router.patch(
+  '/events/:id/status',
+  [param('id').isMongoId().withMessage('Invalid event id')],
+  body('status')
+    .isIn(['upcoming', 'ongoing', 'completed', 'cancelled'])
+    .withMessage('Invalid event status'),
+  validate,
+  adminController.setEventStatus
 );
 
 module.exports = router;

@@ -7,11 +7,11 @@ const VALUES = [
   { Icon: Rocket, title: 'Platform objectives', text: 'One account across volunteering, event management, attendance, certificates, donations and analytics.' },
 ];
 
-const TEAM = [
-  { name: 'Ananya Sharma', role: 'Founder & Product Lead', bio: 'Ex-volunteer coordinator turned technologist, championing community-led development.' },
-  { name: 'Rohan Mehta', role: 'Engineering Lead', bio: 'Full-stack engineer focused on secure, scalable and observable systems.' },
-  { name: 'Priya Iyer', role: 'NGO Partnerships', bio: 'Connects grassroots organizations with technology and volunteers at scale.' },
-  { name: 'Kabir Singh', role: 'Design & Community', bio: 'Designs experiences that make service feel simple, warm and joyful.' },
+const PRINCIPLES = [
+  { title: 'Honest by default', text: 'Every number on this platform is computed from real records. We never display invented metrics, testimonials or rankings.' },
+  { title: 'Verifiable impact', text: 'Volunteering is confirmed by the organising NGO, and finished hours are snapshotted into certificates that anyone can verify.' },
+  { title: 'Accessible to all', text: 'One account for volunteers and organisations, designed to be clear and usable on any device.' },
+  { title: 'Community first', text: 'We build for grassroots organisations and the people who show up for them.' },
 ];
 
 export default function About() {
@@ -47,19 +47,15 @@ export default function About() {
       <section className="bg-white py-16 dark:bg-navy-900">
         <div className="container-x">
           <div className="text-center">
-            <p className="text-sm font-semibold uppercase tracking-widest text-primary-600">Who we are</p>
-            <h2 className="mt-2 section-title">Meet the team</h2>
-            <p className="mx-auto mt-3 section-sub">A small team that believes deeply in the power of collective action.</p>
+            <p className="text-sm font-semibold uppercase tracking-widest text-primary-600">How we build</p>
+            <h2 className="mt-2 section-title">Our principles</h2>
+            <p className="mx-auto mt-3 section-sub">The commitments that shape every decision on the platform.</p>
           </div>
           <div className="mt-12 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-            {TEAM.map((member) => (
-              <div key={member.name} className="card p-6 text-center">
-                <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-primary-500 to-navy-700 font-display text-xl font-bold text-white">
-                  {member.name.split(' ').map((p) => p.charAt(0)).join('')}
-                </div>
-                <h3 className="mt-4 font-display font-semibold text-navy-800 dark:text-white">{member.name}</h3>
-                <p className="mt-1 text-xs font-semibold uppercase tracking-wider text-primary-600">{member.role}</p>
-                <p className="mt-3 text-sm leading-relaxed text-slate-500 dark:text-slate-400">{member.bio}</p>
+            {PRINCIPLES.map((item) => (
+              <div key={item.title} className="card p-6">
+                <h3 className="font-display font-semibold text-navy-800 dark:text-white">{item.title}</h3>
+                <p className="mt-3 text-sm leading-relaxed text-slate-500 dark:text-slate-400">{item.text}</p>
               </div>
             ))}
           </div>

@@ -3,6 +3,8 @@ import { Link, useParams } from 'react-router-dom';
 import {
   ArrowLeft,
   BadgeCheck,
+  Bookmark,
+  BookmarkCheck,
   CalendarDays,
   CheckCircle2,
   Clock,
@@ -13,11 +15,12 @@ import {
   UsersRound,
   XCircle,
 } from 'lucide-react';
-import { apiGet, apiGetOne, apiPatch, apiPost, apiErrorMessage } from '../services/api';
+import { apiGet, apiGetOne, apiPatch, apiPost, apiDelete, apiErrorMessage } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import type { Application, ApplicationStatus, EventItem } from '../types';
 import Spinner from '../components/Spinner';
+import EventCard from '../components/EventCard';
 
 const STATUS_STYLE: Record<ApplicationStatus, string> = {
   pending: 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300',
@@ -25,6 +28,7 @@ const STATUS_STYLE: Record<ApplicationStatus, string> = {
   rejected: 'bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300',
   withdrawn: 'bg-slate-100 text-slate-600 dark:bg-white/10 dark:text-slate-300',
   completed: 'bg-navy-100 text-navy-800 dark:bg-white/10 dark:text-white',
+  cancelled: 'bg-slate-100 text-slate-500 dark:bg-white/10 dark:text-slate-400',
 };
 
 function formatDate(value?: string | null, withYear = true) {
@@ -41,7 +45,7 @@ function formatDate(value?: string | null, withYear = true) {
 
 export default function EventDetail() {
   const { id = '' } = useParams();
-  const { user } = useAuth();
+  const { user, refreshUser } = useAuth();
   const { toast } = useToast();
 
   const [event, setEvent] = useState<EventItem | null>(null);
@@ -50,10 +54,12 @@ export default function EventDetail() {
   const [error, setError] = useState<string | null>(null);
   const [coverNote, setCoverNote] = useState('');
   const [busy, setBusy] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [showForm, setShowForm] = useState(false);
 
   const isVolunteer = user?.role === 'volunteer';
   const canManage = user?.role === 'ngo' || user?.role === 'admin';
+  const saved = Boolean(user?.savedEvents?.includes(id));
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -105,6 +111,25 @@ export default function EventDetail() {
       toast('error', 'Could not withdraw', apiErrorMessage(err));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const toggleSave = async () => {
+    if (!isVolunteer) return;
+    setSaving(true);
+    try {
+      if (saved) {
+        await apiDelete(`/users/me/saved-events/${id}`);
+        toast('info', 'Removed from saved', 'This opportunity is no longer in your saved list.');
+      } else {
+        await apiPost(`/users/me/saved-events/${id}`, {});
+        toast('success', 'Opportunity saved', 'Find it under Saved opportunities in your dashboard.');
+      }
+      await refreshUser();
+    } catch (err) {
+      toast('error', 'Could not update saved list', apiErrorMessage(err));
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -304,6 +329,24 @@ export default function EventDetail() {
                 </button>
               )}
             </div>
+
+            {isVolunteer && (
+              <button
+                type="button"
+                onClick={toggleSave}
+                disabled={saving}
+                className="btn-outline mt-3 w-full"
+              >
+                {saving ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : saved ? (
+                  <BookmarkCheck className="h-4 w-4" />
+                ) : (
+                  <Bookmark className="h-4 w-4" />
+                )}
+                {saved ? 'Saved for later' : 'Save for later'}
+              </button>
+            )}
           </div>
 
           {event.ngo && (
@@ -311,13 +354,30 @@ export default function EventDetail() {
               <h2 className="font-display text-base font-semibold text-navy-800 dark:text-white">About the organisation</h2>
               <p className="mt-2 line-clamp-4 text-sm text-slate-600 dark:text-slate-300">{event.ngo.description}</p>
               {event.ngo.location && <p className="mt-2 text-xs text-slate-500">{event.ngo.location}</p>}
-              <Link to="/ngos" className="mt-4 inline-flex text-sm font-semibold text-primary-700 hover:underline dark:text-primary-400">
-                Explore NGOs
+              <Link to={`/ngos/${event.ngo._id}`} className="mt-4 inline-flex text-sm font-semibold text-primary-700 hover:underline dark:text-primary-400">
+                View organisation
               </Link>
             </div>
           )}
         </aside>
       </div>
+
+      {event.related && event.related.length > 0 && (
+        <section className="mt-14">
+          <div className="flex items-end justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-widest text-primary-600">Keep serving</p>
+              <h2 className="mt-1 font-display text-2xl font-bold text-navy-800 dark:text-white">Related opportunities</h2>
+            </div>
+            <Link to="/events" className="btn-ghost hidden sm:inline-flex">Browse all</Link>
+          </div>
+          <div className="mt-6 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+            {event.related.map((related) => (
+              <EventCard key={related._id} event={related} />
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   );
 }

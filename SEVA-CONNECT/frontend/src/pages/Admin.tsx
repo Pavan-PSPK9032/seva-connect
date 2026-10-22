@@ -6,6 +6,7 @@ import {
   CalendarDays,
   ClipboardList,
   Clock3,
+  Download,
   Loader2,
   RotateCcw,
   ScrollText,
@@ -14,9 +15,9 @@ import {
   Users,
   XCircle,
 } from 'lucide-react';
-import { apiGet, apiGetOne, apiPatch, apiErrorMessage } from '../services/api';
+import { api, apiGet, apiGetOne, apiPatch, apiErrorMessage } from '../services/api';
 import { useToast } from '../context/ToastContext';
-import type { NGO, Pagination, User } from '../types';
+import type { Application, EventItem, NGO, Pagination, User } from '../types';
 import { CardSkeleton } from '../components/Skeleton';
 
 interface OverviewData {
@@ -38,12 +39,14 @@ interface AuditEntry {
   createdAt: string;
 }
 
-type Tab = 'overview' | 'users' | 'ngos' | 'audit';
+type Tab = 'overview' | 'users' | 'ngos' | 'events' | 'applications' | 'audit';
 
 const TABS: { id: Tab; label: string; icon: ReactNode }[] = [
   { id: 'overview', label: 'Overview', icon: <ShieldCheck className="h-4 w-4" /> },
   { id: 'users', label: 'Users', icon: <Users className="h-4 w-4" /> },
   { id: 'ngos', label: 'Organisations', icon: <Building2 className="h-4 w-4" /> },
+  { id: 'events', label: 'Opportunities', icon: <CalendarDays className="h-4 w-4" /> },
+  { id: 'applications', label: 'Applications', icon: <ClipboardList className="h-4 w-4" /> },
   { id: 'audit', label: 'Audit log', icon: <ScrollText className="h-4 w-4" /> },
 ];
 
@@ -72,6 +75,19 @@ export default function Admin() {
   const [ngosPage, setNgosPage] = useState(1);
   const [ngosPagination, setNgosPagination] = useState<Pagination | null>(null);
   const [ngosLoading, setNgosLoading] = useState(false);
+
+  const [events, setEvents] = useState<EventItem[]>([]);
+  const [eventFilter, setEventFilter] = useState('');
+  const [eventsPage, setEventsPage] = useState(1);
+  const [eventsPagination, setEventsPagination] = useState<Pagination | null>(null);
+  const [eventsLoading, setEventsLoading] = useState(false);
+
+  const [applications, setApplications] = useState<Application[]>([]);
+  const [applicationFilter, setApplicationFilter] = useState('');
+  const [applicationsPage, setApplicationsPage] = useState(1);
+  const [applicationsPagination, setApplicationsPagination] = useState<Pagination | null>(null);
+  const [applicationsLoading, setApplicationsLoading] = useState(false);
+  const [exporting, setExporting] = useState<string | null>(null);
 
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [auditPage, setAuditPage] = useState(1);
@@ -119,7 +135,8 @@ export default function Admin() {
       const res = await apiGet<NGO>('/admin/ngos', {
         page,
         limit: 20,
-        verified: ngoFilter || undefined,
+        verified: ngoFilter === 'true' || ngoFilter === 'false' ? ngoFilter : undefined,
+        requested: ngoFilter === 'requested' ? 'true' : undefined,
       });
       setNgos(res.data ?? []);
       setNgosPagination(res.pagination ?? null);
@@ -130,6 +147,42 @@ export default function Admin() {
       setNgosLoading(false);
     }
   }, [ngoFilter, toast]);
+
+  const loadEvents = useCallback(async (page: number) => {
+    setEventsLoading(true);
+    try {
+      const res = await apiGet<EventItem>('/admin/events', {
+        page,
+        limit: 20,
+        status: eventFilter || undefined,
+      });
+      setEvents(res.data ?? []);
+      setEventsPagination(res.pagination ?? null);
+      setEventsPage(page);
+    } catch (err) {
+      toast('error', 'Could not load opportunities', apiErrorMessage(err));
+    } finally {
+      setEventsLoading(false);
+    }
+  }, [eventFilter, toast]);
+
+  const loadApplications = useCallback(async (page: number) => {
+    setApplicationsLoading(true);
+    try {
+      const res = await apiGet<Application>('/admin/applications', {
+        page,
+        limit: 20,
+        status: applicationFilter || undefined,
+      });
+      setApplications(res.data ?? []);
+      setApplicationsPagination(res.pagination ?? null);
+      setApplicationsPage(page);
+    } catch (err) {
+      toast('error', 'Could not load applications', apiErrorMessage(err));
+    } finally {
+      setApplicationsLoading(false);
+    }
+  }, [applicationFilter, toast]);
 
   const loadAudit = useCallback(async (page: number) => {
     setAuditLoading(true);
@@ -156,6 +209,14 @@ export default function Admin() {
   useEffect(() => {
     if (tab === 'ngos') loadNGOs(1);
   }, [tab, loadNGOs]);
+
+  useEffect(() => {
+    if (tab === 'events') loadEvents(1);
+  }, [tab, loadEvents]);
+
+  useEffect(() => {
+    if (tab === 'applications') loadApplications(1);
+  }, [tab, loadApplications]);
 
   useEffect(() => {
     if (tab === 'audit') loadAudit(1);
@@ -188,6 +249,48 @@ export default function Admin() {
     }
   };
 
+  const setEventStatus = async (event: EventItem, status: string) => {
+    if (status === event.status) return;
+    if (
+      status === 'cancelled' &&
+      !window.confirm(`Cancel "${event.title}"? Open applications will be closed and volunteers notified.`)
+    ) {
+      return;
+    }
+    setBusyId(event._id);
+    try {
+      await apiPatch(`/admin/events/${event._id}/status`, { status });
+      setEvents((prev) => prev.map((item) => (item._id === event._id ? { ...item, status } : item)));
+      toast('success', 'Opportunity updated', `"${event.title}" is now ${status}.`);
+    } catch (err) {
+      toast('error', 'Could not update opportunity', apiErrorMessage(err));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const downloadCsv = async (type: 'users' | 'ngos' | 'events' | 'applications') => {
+    setExporting(type);
+    try {
+      const res = await api.get('/admin/export', { params: { type }, responseType: 'blob' });
+      const url = URL.createObjectURL(res.data as Blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `seva-connect-${type}.csv`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      toast('error', 'Export failed', apiErrorMessage(err));
+    } finally {
+      setExporting(null);
+    }
+  };
+
+  const exportType =
+    tab === 'users' || tab === 'ngos' || tab === 'events' || tab === 'applications' ? tab : null;
+
   return (
     <div className="container-x py-12">
       <div>
@@ -212,6 +315,20 @@ export default function Admin() {
           </button>
         ))}
       </div>
+
+      {exportType && (
+        <div className="mt-4 flex justify-end">
+          <button
+            type="button"
+            onClick={() => void downloadCsv(exportType)}
+            disabled={exporting !== null}
+            className="btn-outline text-sm"
+          >
+            {exporting === exportType ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+            Export this list as CSV
+          </button>
+        </div>
+      )}
 
       <div className="mt-8">
         {tab === 'overview' && (
@@ -331,6 +448,7 @@ export default function Admin() {
                 <option value="">All organisations</option>
                 <option value="true">Verified</option>
                 <option value="false">Pending verification</option>
+                <option value="requested">Verification requested</option>
               </select>
             </div>
 
@@ -346,14 +464,22 @@ export default function Admin() {
                     return (
                       <li key={ngo._id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
                         <div className="min-w-0">
-                          <p className="flex items-center gap-2 text-sm font-medium text-navy-800 dark:text-slate-200">
+                          <p className="flex flex-wrap items-center gap-2 text-sm font-medium text-navy-800 dark:text-slate-200">
                             {ngo.organizationName}
                             {ngo.verified && <BadgeCheck className="h-4 w-4 text-primary-600" />}
+                            {!ngo.verified && ngo.verificationRequested && (
+                              <span className="chip bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300">requested</span>
+                            )}
                           </p>
                           <p className="truncate text-xs text-slate-500">
                             {ngo.contactEmail}
                             {owner?.name ? ` · managed by ${owner.name}` : ''}
                           </p>
+                          {ngo.verificationRequested && ngo.verificationNote && (
+                            <p className="mt-1 line-clamp-2 max-w-xl text-xs text-sky-700 dark:text-sky-300">
+                              Note: {ngo.verificationNote}
+                            </p>
+                          )}
                         </div>
                         <button
                           type="button"
@@ -371,6 +497,104 @@ export default function Admin() {
               )}
             </div>
             <Pager pagination={ngosPagination} page={ngosPage} onPage={loadNGOs} />
+          </>
+        )}
+
+        {tab === 'events' && (
+          <>
+            <div className="flex flex-wrap items-center gap-3">
+              <select value={eventFilter} onChange={(e) => setEventFilter(e.target.value)} className="input w-auto">
+                <option value="">All statuses</option>
+                <option value="upcoming">Upcoming</option>
+                <option value="ongoing">Ongoing</option>
+                <option value="completed">Completed</option>
+                <option value="cancelled">Cancelled</option>
+              </select>
+            </div>
+
+            <div className="card mt-4 overflow-hidden">
+              {eventsLoading ? (
+                <div className="p-5"><CardSkeleton /></div>
+              ) : events.length === 0 ? (
+                <p className="p-8 text-center text-sm text-slate-500">No opportunities found.</p>
+              ) : (
+                <ul className="divide-y divide-navy-700/10 dark:divide-white/10">
+                  {events.map((event) => (
+                    <li key={event._id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-navy-800 dark:text-slate-200">{event.title}</p>
+                        <p className="truncate text-xs text-slate-500">
+                          {event.ngoName || (typeof event.ngoId === 'object' ? (event.ngoId as { organizationName?: string }).organizationName : '')}
+                          {event.date ? ` · ${formatDate(event.date)}` : ''}
+                          {` · ${event.registeredVolunteers ?? 0}/${event.requiredVolunteers ?? 0} seats`}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        {busyId === event._id && <Loader2 className="h-4 w-4 animate-spin text-slate-400" />}
+                        <select
+                          value={event.status || 'upcoming'}
+                          onChange={(e) => void setEventStatus(event, e.target.value)}
+                          disabled={busyId === event._id}
+                          className="input w-auto text-sm"
+                          aria-label={`Status for ${event.title}`}
+                        >
+                          <option value="upcoming">Upcoming</option>
+                          <option value="ongoing">Ongoing</option>
+                          <option value="completed">Completed</option>
+                          <option value="cancelled">Cancelled</option>
+                        </select>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <Pager pagination={eventsPagination} page={eventsPage} onPage={loadEvents} />
+          </>
+        )}
+
+        {tab === 'applications' && (
+          <>
+            <div className="flex flex-wrap items-center gap-3">
+              <select value={applicationFilter} onChange={(e) => setApplicationFilter(e.target.value)} className="input w-auto">
+                <option value="">All statuses</option>
+                <option value="pending">Pending</option>
+                <option value="approved">Approved</option>
+                <option value="completed">Completed</option>
+                <option value="rejected">Rejected</option>
+                <option value="withdrawn">Withdrawn</option>
+                <option value="cancelled">Cancelled</option>
+              </select>
+            </div>
+
+            <div className="card mt-4 overflow-hidden">
+              {applicationsLoading ? (
+                <div className="p-5"><CardSkeleton /></div>
+              ) : applications.length === 0 ? (
+                <p className="p-8 text-center text-sm text-slate-500">No applications found.</p>
+              ) : (
+                <ul className="divide-y divide-navy-700/10 dark:divide-white/10">
+                  {applications.map((application) => (
+                    <li key={application._id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-navy-800 dark:text-slate-200">
+                          {application.volunteer?.name ?? 'Volunteer'}
+                        </p>
+                        <p className="truncate text-xs text-slate-500">
+                          {application.volunteer?.email}
+                          {application.event?.title ? ` · ${application.event.title}` : ''}
+                          {application.hoursCredited > 0 ? ` · ${application.hoursCredited}h` : ''}
+                        </p>
+                      </div>
+                      <span className="chip bg-slate-100 capitalize text-slate-600 dark:bg-white/10 dark:text-slate-300">
+                        {application.status}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <Pager pagination={applicationsPagination} page={applicationsPage} onPage={loadApplications} />
           </>
         )}
 

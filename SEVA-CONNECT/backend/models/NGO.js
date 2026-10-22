@@ -45,6 +45,20 @@ const ngoSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
+  verificationRequested: {
+    type: Boolean,
+    default: false,
+  },
+  verificationNote: {
+    type: String,
+    trim: true,
+    maxlength: [1000, 'Verification note cannot exceed 1000 characters'],
+    default: '',
+  },
+  verifiedAt: {
+    type: Date,
+    default: null,
+  },
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',

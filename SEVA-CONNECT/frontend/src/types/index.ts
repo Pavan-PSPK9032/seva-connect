@@ -9,6 +9,11 @@ export interface User {
   skills?: string[];
   interests?: string[];
   profileImage?: string;
+  location?: string;
+  availability?: string;
+  preferredCauses?: string[];
+  savedEvents?: string[];
+  leaderboardOptOut?: boolean;
   accountStatus?: 'active' | 'suspended';
   notificationPrefs?: NotificationPreferences;
   createdAt?: string;
@@ -24,6 +29,15 @@ export interface NGO {
   website?: string;
   logo?: string;
   verified: boolean;
+  verificationRequested?: boolean;
+  verificationNote?: string;
+  verifiedAt?: string | null;
+  events?: EventItem[];
+  stats?: {
+    completedEvents: number;
+    verifiedHours: number;
+    activeVolunteers: number;
+  };
   createdBy?: string;
   createdAt?: string;
 }
@@ -37,7 +51,7 @@ export interface EventItem {
   location: string;
   online?: boolean;
   causes?: string[];
-  ngoId: string;
+  ngoId: string | { _id: string; organizationName?: string; verified?: boolean };
   ngoName?: string;
   ngoVerified?: boolean;
   ngoLogo?: string;
@@ -48,6 +62,9 @@ export interface EventItem {
   applicationDeadline?: string | null;
   status?: string;
   createdAt?: string;
+  matchScore?: number;
+  matchReasons?: string[];
+  related?: EventItem[];
   ngo?: {
     _id: string;
     organizationName: string;
@@ -61,7 +78,13 @@ export interface EventItem {
   };
 }
 
-export type ApplicationStatus = 'pending' | 'approved' | 'rejected' | 'withdrawn' | 'completed';
+export type ApplicationStatus =
+  | 'pending'
+  | 'approved'
+  | 'rejected'
+  | 'withdrawn'
+  | 'completed'
+  | 'cancelled';
 
 export interface ApplicationEvent {
   _id: string;
@@ -111,6 +134,7 @@ export interface ApplicationSummary {
   completed: number;
   rejected: number;
   withdrawn: number;
+  cancelled: number;
   hours: number;
 }
 
@@ -122,6 +146,9 @@ export type NotificationType =
   | 'application_completed'
   | 'event_updated'
   | 'event_cancelled'
+  | 'event_reminder'
+  | 'certificate_ready'
+  | 'verification_requested'
   | 'system';
 
 export interface NotificationItem {
@@ -151,6 +178,83 @@ export interface PlatformStats {
   completedEvents: number;
   applications: number;
   verifiedHours: number;
+}
+
+export interface ImpactBreakdown {
+  cause?: string;
+  location?: string;
+  activities: number;
+  hours: number;
+}
+
+export interface ImpactMonth {
+  month: string;
+  label: string;
+  activities: number;
+  hours: number;
+}
+
+export interface ImpactTrendPoint {
+  month: string;
+  label: string;
+  applications: number;
+}
+
+export interface TopNGO {
+  ngoId: string;
+  name: string;
+  verified: boolean;
+  activities: number;
+  hours: number;
+}
+
+export interface ImpactData {
+  generatedAt: string;
+  totals: {
+    volunteers: number;
+    ngos: number;
+    verifiedNgos: number;
+    opportunities: number;
+    completedEvents: number;
+    applications: number;
+    completedActivities: number;
+    activeContributors: number;
+    verifiedHours: number;
+  };
+  eventStats: {
+    upcoming: number;
+    ongoing: number;
+    completed: number;
+    cancelled: number;
+    total: number;
+    completionRate: number;
+  };
+  byCause: ImpactBreakdown[];
+  byLocation: ImpactBreakdown[];
+  monthly: ImpactMonth[];
+  applicationTrend: ImpactTrendPoint[];
+  topNGOs: TopNGO[];
+  notes: { period: string; source: string };
+}
+
+export interface LeaderboardEntry {
+  rank: number;
+  volunteerId: string;
+  name: string;
+  profileImage?: string;
+  location?: string;
+  hours: number;
+  activities: number;
+  lastCompletedAt?: string;
+}
+
+export interface LeaderboardData {
+  period: 'all' | 'week' | 'month';
+  periodStart: string | null;
+  totalParticipants: number;
+  totalHours: number;
+  scoring: string;
+  entries: LeaderboardEntry[];
 }
 
 export interface Certificate {
@@ -183,6 +287,7 @@ export interface ValidationFieldError {
 export interface ApiResponse<T> {
   success: boolean;
   message?: string;
+  note?: string;
   data?: T;
   token?: string;
   user?: User;

@@ -8,6 +8,7 @@
  */
 const NGO = require('../models/NGO');
 const Event = require('../models/Event');
+const Application = require('../models/Application');
 
 const SORTABLE = { name: 'organizationName', location: 'location', createdAt: 'createdAt' };
 
@@ -81,6 +82,7 @@ async function createNGO(req, res, next) {
       website: website || '',
       logo: logo || '',
       createdBy: req.user._id,
+      verificationRequested: true,
     });
 
     return res.status(201).json({
@@ -153,4 +155,80 @@ async function deleteNGO(req, res, next) {
   }
 }
 
-module.exports = { getNGOs, getMyNGOs, createNGO, updateNGO, deleteNGO };
+// GET /api/ngos/:id
+async function getNGO(req, res, next) {
+  try {
+    const ngo = await NGO.findById(req.params.id);
+    if (!ngo) {
+      return res.status(404).json({ success: false, message: 'NGO not found.' });
+    }
+
+    const [events, completedEvents, totalHours, volunteers] = await Promise.all([
+      Event.find({ ngoId: ngo._id, status: { $in: ['upcoming', 'ongoing'] } })
+        .sort({ date: 1 })
+        .limit(6),
+      Event.countDocuments({ ngoId: ngo._id, status: 'completed' }),
+      Application.aggregate([
+        { $lookup: { from: 'events', localField: 'eventId', foreignField: '_id', as: 'event' } },
+        { $unwind: '$event' },
+        { $match: { 'event.ngoId': ngo._id, status: 'completed' } },
+        { $group: { _id: null, hours: { $sum: '$hoursCredited' } } },
+      ]),
+      Application.aggregate([
+        { $lookup: { from: 'events', localField: 'eventId', foreignField: '_id', as: 'event' } },
+        { $unwind: '$event' },
+        { $match: { 'event.ngoId': ngo._id, status: 'completed' } },
+        { $group: { _id: '$volunteerId' } },
+        { $count: 'total' },
+      ]),
+    ]);
+
+    return res.json({
+      success: true,
+      data: {
+        ...ngo.toObject(),
+        events,
+        stats: {
+          completedEvents,
+          verifiedHours: totalHours[0]?.hours || 0,
+          activeVolunteers: volunteers[0]?.total || 0,
+        },
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+// PATCH /api/ngos/:id/request-verification
+async function requestVerification(req, res, next) {
+  try {
+    const ngo = await NGO.findById(req.params.id);
+    if (!ngo) {
+      return res.status(404).json({ success: false, message: 'NGO not found.' });
+    }
+    if (!canManageNGO(req.user, ngo)) {
+      return res.status(403).json({
+        success: false,
+        message: 'You can only manage NGOs you created.',
+      });
+    }
+    if (ngo.verified) {
+      return res.status(400).json({ success: false, message: 'This organisation is already verified.' });
+    }
+
+    ngo.verificationRequested = true;
+    if (req.body.note !== undefined) ngo.verificationNote = String(req.body.note).trim();
+    await ngo.save();
+
+    return res.json({
+      success: true,
+      message: 'Verification requested. An administrator will review this organisation.',
+      data: { _id: ngo._id, verificationRequested: ngo.verificationRequested },
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+module.exports = { getNGOs, getNGO, getMyNGOs, createNGO, updateNGO, requestVerification, deleteNGO };

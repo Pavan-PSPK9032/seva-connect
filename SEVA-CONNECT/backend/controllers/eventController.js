@@ -8,6 +8,8 @@
  */
 const Event = require('../models/Event');
 const NGO = require('../models/NGO');
+const Application = require('../models/Application');
+const { notify } = require('../services/notificationService');
 
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -46,21 +48,32 @@ async function getEvents(req, res, next) {
         { description: { $regex: escapeRegex(q), $options: 'i' } },
         { location: { $regex: escapeRegex(q), $options: 'i' } },
         { causes: { $regex: escapeRegex(q), $options: 'i' } },
+        { requiredSkills: { $regex: escapeRegex(q), $options: 'i' } },
       ];
     }
     if (req.query.cause) {
       filter.causes = { $regex: `^${escapeRegex(req.query.cause)}$`, $options: 'i' };
     }
+    if (req.query.skill) {
+      filter.requiredSkills = { $regex: escapeRegex(String(req.query.skill).trim()), $options: 'i' };
+    }
     if (req.query.online === 'true') filter.online = true;
     if (req.query.online === 'false') filter.online = false;
     if (req.query.ngoId) filter.ngoId = req.query.ngoId;
+    if (req.query.hasSeats === 'true') {
+      filter.$expr = { $lt: ['$registeredVolunteers', '$requiredVolunteers'] };
+    }
 
     const order = req.query.order === 'desc' ? -1 : 1;
+    let sort = { date: order };
+    if (req.query.sort === 'newest') sort = { createdAt: -1 };
+    if (req.query.sort === 'deadline') sort = { applicationDeadline: 1, date: 1 };
+    if (req.query.sort === 'popular') sort = { registeredVolunteers: -1, date: 1 };
 
     const [items, total] = await Promise.all([
       Event.find(filter)
         .populate(populate)
-        .sort({ date: order })
+        .sort(sort)
         .skip(skip)
         .limit(limit),
       Event.countDocuments(filter),
@@ -103,7 +116,75 @@ async function getEvent(req, res, next) {
       };
     }
 
+    const relatedFilter = {
+      _id: { $ne: event._id },
+      status: { $in: ['upcoming', 'ongoing'] },
+    };
+    if (event.causes && event.causes.length) relatedFilter.causes = { $in: event.causes };
+
+    const related = await Event.find(relatedFilter)
+      .populate(populate)
+      .sort({ date: 1 })
+      .limit(3);
+
+    doc.related = related.map(shapeEvent);
+
     return res.json({ success: true, data: doc });
+  } catch (error) {
+    next(error);
+  }
+}
+
+// GET /api/events/recommended
+// Ranks live opportunities against the volunteer's saved skills, interests and
+// preferred causes. Never returns invented events or scores.
+async function getRecommended(req, res, next) {
+  try {
+    if (req.user.role !== 'volunteer') {
+      return res.status(403).json({ success: false, message: 'Recommendations are for volunteer accounts.' });
+    }
+
+    const [events, applied] = await Promise.all([
+      Event.find({ status: { $in: ['upcoming', 'ongoing'] } }).populate(populate).limit(120),
+      Application.find({
+        volunteerId: req.user._id,
+        status: { $in: ['pending', 'approved', 'completed'] },
+      }).select('eventId'),
+    ]);
+
+    const appliedIds = new Set(applied.map((application) => String(application.eventId)));
+    const interests = new Set(
+      [...(req.user.interests || []), ...(req.user.preferredCauses || [])].map((value) =>
+        String(value).toLowerCase()
+      )
+    );
+    const skills = new Set((req.user.skills || []).map((value) => String(value).toLowerCase()));
+
+    const scored = events
+      .filter((event) => !appliedIds.has(String(event._id)))
+      .map((event) => {
+        const causes = (event.causes || []).filter((cause) => interests.has(String(cause).toLowerCase()));
+        const skillMatches = (event.requiredSkills || []).filter((skill) =>
+          skills.has(String(skill).toLowerCase())
+        );
+        const matchScore = causes.length * 2 + skillMatches.length * 3;
+        return {
+          ...shapeEvent(event),
+          matchScore,
+          matchReasons: [
+            ...causes.map((cause) => `Cause: ${cause}`),
+            ...skillMatches.map((skill) => `Skill: ${skill}`),
+          ],
+        };
+      })
+      .sort((a, b) => b.matchScore - a.matchScore || new Date(a.date) - new Date(b.date))
+      .slice(0, 6);
+
+    return res.json({
+      success: true,
+      data: scored,
+      note: 'Ranked only from your saved skills, interests and preferred causes.',
+    });
   } catch (error) {
     next(error);
   }
@@ -173,6 +254,13 @@ async function updateEvent(req, res, next) {
       return res.status(404).json({ success: false, message: 'Event not found.' });
     }
 
+    const previous = {
+      status: event.status,
+      date: event.date ? new Date(event.date).toISOString() : null,
+      time: event.time,
+      location: event.location,
+    };
+
     const ngo = await NGO.findById(event.ngoId);
     if (!canManageNGO(req.user, ngo)) {
       return res.status(403).json({
@@ -215,6 +303,76 @@ async function updateEvent(req, res, next) {
     if (status !== undefined) event.status = status;
 
     await event.save();
+
+    const current = {
+      date: event.date ? new Date(event.date).toISOString() : null,
+      time: event.time,
+      location: event.location,
+    };
+    const scheduleChanged =
+      current.date !== previous.date ||
+      current.time !== previous.time ||
+      current.location !== previous.location;
+
+    if (previous.status !== 'cancelled' && event.status === 'cancelled') {
+      // Cancelling an opportunity releases approved seats and closes every
+      // still-open application, notifying each volunteer exactly once.
+      const affected = await Application.find({
+        eventId: event._id,
+        status: { $in: ['pending', 'approved'] },
+      }).select('volunteerId status');
+
+      const approvedCount = affected.filter((application) => application.status === 'approved').length;
+
+      await Application.updateMany(
+        { eventId: event._id, status: { $in: ['pending', 'approved'] } },
+        { $set: { status: 'cancelled', decidedBy: req.user._id, decidedAt: new Date() } }
+      );
+
+      if (approvedCount > 0) {
+        await Event.updateOne({ _id: event._id }, [
+          {
+            $set: {
+              registeredVolunteers: {
+                $max: [0, { $subtract: ['$registeredVolunteers', approvedCount] }],
+              },
+            },
+          },
+        ]);
+      }
+
+      await Promise.all(
+        affected.slice(0, 200).map((application) =>
+          notify({
+            recipient: application.volunteerId,
+            type: 'event_cancelled',
+            title: 'Opportunity cancelled',
+            message: `"${event.title}" was cancelled by the organiser. Your application has been closed.`,
+            link: `/events/${event._id}`,
+            meta: { eventId: String(event._id) },
+          })
+        )
+      );
+    } else if (scheduleChanged) {
+      const affected = await Application.find({
+        eventId: event._id,
+        status: { $in: ['pending', 'approved'] },
+      }).select('volunteerId');
+
+      await Promise.all(
+        affected.slice(0, 200).map((application) =>
+          notify({
+            recipient: application.volunteerId,
+            type: 'event_updated',
+            title: 'Opportunity details updated',
+            message: `"${event.title}" has new date, time or location details. Please check the event page.`,
+            link: `/events/${event._id}`,
+            meta: { eventId: String(event._id) },
+          })
+        )
+      );
+    }
+
     const populated = await Event.findById(event._id).populate(populate);
     return res.json({ success: true, message: 'Event updated.', data: shapeEvent(populated) });
   } catch (error) {
@@ -244,4 +402,4 @@ async function deleteEvent(req, res, next) {
   }
 }
 
-module.exports = { getEvents, getEvent, getMyEvents, createEvent, updateEvent, deleteEvent };
+module.exports = { getEvents, getEvent, getRecommended, getMyEvents, createEvent, updateEvent, deleteEvent };

@@ -43,6 +43,7 @@ const idParam = [param('id').isMongoId().withMessage('Invalid event id')];
 
 router.get('/', eventController.getEvents);
 router.get('/mine', protect, authorize('ngo', 'admin'), eventController.getMyEvents);
+router.get('/recommended', protect, eventController.getRecommended);
 router.get('/:id', idParam, validate, eventController.getEvent);
 router.post('/', protect, authorize('ngo', 'admin'), eventBody(), validate, eventController.createEvent);
 router.patch('/:id', protect, idParam, eventBody({ update: true }), validate, eventController.updateEvent);

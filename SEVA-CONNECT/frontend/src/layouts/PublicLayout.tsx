@@ -6,8 +6,14 @@ import { ChatbotWidget } from '../components/Chatbot';
 
 const TITLES: [RegExp, string][] = [
   [/^\/$/, 'Seva Connect — Volunteer with verified NGOs'],
+  [/^\/how-it-works/, 'How it works | Seva Connect'],
+  [/^\/impact/, 'Impact analytics | Seva Connect'],
+  [/^\/leaderboard/, 'Volunteer leaderboard | Seva Connect'],
+  [/^\/privacy/, 'Privacy policy | Seva Connect'],
+  [/^\/terms/, 'Terms of use | Seva Connect'],
   [/^\/events\/[^/]+/, 'Opportunity details | Seva Connect'],
   [/^\/events/, 'Volunteering opportunities | Seva Connect'],
+  [/^\/ngos\/[^/]+/, 'Organisation profile | Seva Connect'],
   [/^\/ngos/, 'Explore NGOs | Seva Connect'],
   [/^\/dashboard/, 'Volunteer dashboard | Seva Connect'],
   [/^\/certificates\//, 'Volunteer certificate | Seva Connect'],

@@ -37,7 +37,16 @@ const idParam = [param('id').isMongoId().withMessage('Invalid NGO id')];
 
 router.get('/', ngoController.getNGOs);
 router.get('/mine', protect, authorize('ngo', 'admin'), ngoController.getMyNGOs);
+router.get('/:id', idParam, validate, ngoController.getNGO);
 router.post('/', protect, authorize('ngo', 'admin'), ngoBody(), validate, ngoController.createNGO);
+router.patch(
+  '/:id/request-verification',
+  protect,
+  idParam,
+  body('note').optional().trim().isLength({ max: 1000 }).withMessage('Note is too long'),
+  validate,
+  ngoController.requestVerification
+);
 router.patch('/:id', protect, idParam, ngoBody({ update: true }), validate, ngoController.updateNGO);
 router.delete('/:id', protect, idParam, validate, ngoController.deleteNGO);
 

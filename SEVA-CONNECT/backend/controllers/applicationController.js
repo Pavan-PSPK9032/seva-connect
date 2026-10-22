@@ -164,6 +164,7 @@ async function getMine(req, res, next) {
       completed: items.filter((a) => a.status === 'completed').length,
       rejected: items.filter((a) => a.status === 'rejected').length,
       withdrawn: items.filter((a) => a.status === 'withdrawn').length,
+      cancelled: items.filter((a) => a.status === 'cancelled').length,
       hours: hours[0]?.hours || 0,
     };
 

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import { Link } from 'react-router-dom';
 import {
   Award,
+  Bookmark,
   CalendarCheck2,
   CalendarClock,
   CheckCircle2,
@@ -14,8 +15,9 @@ import {
 import { apiGet, apiPatch, apiErrorMessage } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
-import type { Application, ApplicationStatus, ApplicationSummary, Certificate } from '../types';
+import type { Application, ApplicationStatus, ApplicationSummary, Certificate, EventItem } from '../types';
 import { GridSkeleton } from '../components/Skeleton';
+import EventCard from '../components/EventCard';
 
 const STATUS_STYLE: Record<ApplicationStatus, string> = {
   pending: 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300',
@@ -23,9 +25,10 @@ const STATUS_STYLE: Record<ApplicationStatus, string> = {
   rejected: 'bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300',
   withdrawn: 'bg-slate-100 text-slate-600 dark:bg-white/10 dark:text-slate-300',
   completed: 'bg-navy-100 text-navy-800 dark:bg-white/10 dark:text-white',
+  cancelled: 'bg-slate-100 text-slate-500 dark:bg-white/10 dark:text-slate-400',
 };
 
-const FILTERS = ['all', 'pending', 'approved', 'completed', 'rejected', 'withdrawn'] as const;
+const FILTERS = ['all', 'pending', 'approved', 'completed', 'rejected', 'withdrawn', 'cancelled'] as const;
 type Filter = (typeof FILTERS)[number];
 
 function formatDate(value?: string) {
@@ -41,6 +44,9 @@ export default function Dashboard() {
   const [items, setItems] = useState<Application[]>([]);
   const [summary, setSummary] = useState<ApplicationSummary | null>(null);
   const [certificates, setCertificates] = useState<Record<string, string>>({});
+  const [saved, setSaved] = useState<EventItem[]>([]);
+  const [recommended, setRecommended] = useState<EventItem[]>([]);
+  const [recommendationNote, setRecommendationNote] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>('all');
@@ -63,6 +69,18 @@ export default function Dashboard() {
         setCertificates(map);
       } catch {
         /* certificates are optional; never block the dashboard */
+      }
+
+      try {
+        const [savedRes, recommendedRes] = await Promise.all([
+          apiGet<EventItem>('/users/me/saved-events'),
+          apiGet<EventItem>('/events/recommended'),
+        ]);
+        setSaved(savedRes.data ?? []);
+        setRecommended(recommendedRes.data ?? []);
+        setRecommendationNote(recommendedRes.note ?? '');
+      } catch {
+        /* personalisation is optional; the core dashboard still works */
       }
     } catch (err) {
       setError(apiErrorMessage(err));
@@ -112,6 +130,52 @@ export default function Dashboard() {
         <StatCard icon={<CheckCircle2 className="h-5 w-5" />} label="Completed" value={summary?.completed ?? 0} />
         <StatCard icon={<Clock3 className="h-5 w-5" />} label="Verified hours" value={summary?.hours ?? 0} />
       </div>
+
+      {saved.length > 0 && (
+        <section className="mt-10">
+          <div className="flex items-end justify-between gap-3">
+            <div>
+              <p className="flex items-center gap-2 text-sm font-semibold uppercase tracking-widest text-primary-600">
+                <Bookmark className="h-4 w-4" /> Saved opportunities
+              </p>
+              <h2 className="mt-1 font-display text-xl font-bold text-navy-800 dark:text-white">Your shortlist</h2>
+            </div>
+            <Link to="/events" className="btn-ghost text-sm">Find more</Link>
+          </div>
+          <div className="mt-4 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+            {saved.slice(0, 3).map((event) => (
+              <EventCard key={event._id} event={event} />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {recommended.length > 0 && (
+        <section className="mt-10">
+          <div className="flex items-end justify-between gap-3">
+            <div>
+              <p className="flex items-center gap-2 text-sm font-semibold uppercase tracking-widest text-primary-600">
+                <Sparkles className="h-4 w-4" /> Recommended for you
+              </p>
+              <h2 className="mt-1 font-display text-xl font-bold text-navy-800 dark:text-white">Matched to your profile</h2>
+              {recommendationNote && <p className="mt-1 text-xs text-slate-500">{recommendationNote}</p>}
+            </div>
+            <Link to="/profile" className="btn-ghost text-sm">Update skills</Link>
+          </div>
+          <div className="mt-4 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+            {recommended.slice(0, 3).map((event) => (
+              <div key={event._id}>
+                <EventCard event={event} />
+                {event.matchReasons && event.matchReasons.length > 0 && (
+                  <p className="mt-2 line-clamp-1 text-xs text-primary-700 dark:text-primary-300">
+                    {event.matchReasons.join(' · ')}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       <div className="mt-10 flex flex-wrap items-center gap-2">
         {FILTERS.map((option) => (
@@ -182,7 +246,7 @@ export default function Dashboard() {
 
                   {application.coverNote && (
                     <p className="mt-3 rounded-xl bg-slate-50 p-3 text-sm text-slate-600 dark:bg-white/5 dark:text-slate-300">
-                      “{application.coverNote}”
+                      {application.coverNote}
                     </p>
                   )}
 

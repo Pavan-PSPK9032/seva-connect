@@ -27,12 +27,17 @@ export default function Footer() {
   const quickLinks = [
     { to: '/', label: 'Home' },
     { to: '/about', label: 'About Us' },
+    { to: '/how-it-works', label: 'How It Works' },
     { to: '/ngos', label: 'Explore NGOs' },
     { to: '/events', label: 'Explore Events' },
+    { to: '/impact', label: 'Our Impact' },
+    { to: '/leaderboard', label: 'Leaderboard' },
   ];
   const supportLinks = [
     { to: '/faq', label: 'FAQ' },
     { to: '/contact', label: 'Contact Us' },
+    { to: '/privacy', label: 'Privacy Policy' },
+    { to: '/terms', label: 'Terms of Use' },
     { to: '/login', label: 'Log in' },
     { to: '/register', label: 'Join as Volunteer' },
   ];

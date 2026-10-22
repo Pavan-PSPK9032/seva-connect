@@ -6,9 +6,15 @@ import Spinner from './components/Spinner';
 import Home from './pages/Home';
 
 const ExploreNGOs = lazy(() => import('./pages/ExploreNGOs'));
+const NGOProfile = lazy(() => import('./pages/NGOProfile'));
 const ExploreEvents = lazy(() => import('./pages/ExploreEvents'));
 const EventDetail = lazy(() => import('./pages/EventDetail'));
 const About = lazy(() => import('./pages/About'));
+const HowItWorks = lazy(() => import('./pages/HowItWorks'));
+const Impact = lazy(() => import('./pages/Impact'));
+const Leaderboard = lazy(() => import('./pages/Leaderboard'));
+const Privacy = lazy(() => import('./pages/Privacy'));
+const Terms = lazy(() => import('./pages/Terms'));
 const Login = lazy(() => import('./pages/Login'));
 const Register = lazy(() => import('./pages/Register'));
 const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
@@ -31,7 +37,13 @@ export default function App() {
       <Route element={<PublicLayout />}>
         <Route path="/" element={<Home />} />
         <Route path="/about" element={<About />} />
+        <Route path="/how-it-works" element={<HowItWorks />} />
+        <Route path="/impact" element={<Impact />} />
+        <Route path="/leaderboard" element={<Leaderboard />} />
+        <Route path="/privacy" element={<Privacy />} />
+        <Route path="/terms" element={<Terms />} />
         <Route path="/ngos" element={<ExploreNGOs />} />
+        <Route path="/ngos/:id" element={<NGOProfile />} />
         <Route path="/events" element={<ExploreEvents />} />
         <Route path="/events/:id" element={<EventDetail />} />
         <Route path="/certificates/:code" element={<CertificateView />} />

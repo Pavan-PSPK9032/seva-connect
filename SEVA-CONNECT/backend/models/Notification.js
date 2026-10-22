@@ -13,6 +13,9 @@ const TYPES = [
   'application_completed',
   'event_updated',
   'event_cancelled',
+  'event_reminder',
+  'certificate_ready',
+  'verification_requested',
   'system',
 ];
 
