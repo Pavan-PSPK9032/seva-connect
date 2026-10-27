@@ -1043,7 +1043,7 @@ async function listEvents(req, res, next) {
   }
 }
 
-const EVENT_STATUSES = ['draft', 'upcoming', 'ongoing', 'completed', 'cancelled', 'archived'];
+const EVENT_STATUSES = ['draft', 'pending_approval', 'upcoming', 'ongoing', 'completed', 'cancelled', 'archived'];
 
 // PATCH /api/admin/events/:id/status
 // Moderation endpoint. Cancelling mirrors the NGO flow: seats are released and
@@ -1075,7 +1075,14 @@ async function setEventStatus(req, res, next) {
       });
     }
 
-    event.status = status;
+    if (status === 'upcoming') {
+      event.approved = true;
+      event.status = 'upcoming';
+      event.approvedAt = event.approvedAt || new Date();
+      event.approvedBy = req.user._id;
+    } else {
+      event.status = status;
+    }
     await event.save();
 
     if (status === 'cancelled' && !wasCancelled) {
@@ -1117,23 +1124,33 @@ async function setEventStatus(req, res, next) {
     }
 
     if (event.ngoId?.createdBy) {
-      await notify({
-        recipient: event.ngoId.createdBy,
-        type: 'event_updated',
-        title: `Opportunity ${status}`,
-        message: `An administrator changed "${event.title}" to ${status}.`,
-        link: '/my-ngo',
-      });
+      if (event.status === 'upcoming' && event.approved) {
+        await notify({
+          recipient: event.ngoId.createdBy,
+          type: 'event_published',
+          title: 'Event approved',
+          message: `"${event.title}" has been approved and is now live for volunteers to participate.`,
+          link: `/events/${event._id}`,
+        });
+      } else {
+        await notify({
+          recipient: event.ngoId.createdBy,
+          type: 'event_updated',
+          title: `Opportunity ${status}`,
+          message: `An administrator changed "${event.title}" to ${status.replace(/_/g, ' ')}.`,
+          link: '/my-ngo',
+        });
+      }
     }
 
     await audit.record(req, {
-      action: `event.${status}`,
+      action: event.approved && event.status === 'upcoming' ? 'event.approve' : `event.${status}`,
       entityType: 'Event',
       entityId: event._id,
-      summary: `Set "${event.title}" to ${status}`,
+      summary: event.approved && event.status === 'upcoming' ? `Approved "${event.title}"` : `Set "${event.title}" to ${status.replace(/_/g, ' ')}`,
     });
 
-    return res.json({ success: true, message: `Opportunity marked ${status}.`, data: event });
+    return res.json({ success: true, message: event.approved && event.status === 'upcoming' ? 'Event approved and published.' : `Opportunity marked ${status.replace(/_/g, ' ')}.`, data: event });
   } catch (error) {
     next(error);
   }

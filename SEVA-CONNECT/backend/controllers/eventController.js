@@ -35,7 +35,7 @@ async function getEvents(req, res, next) {
     const limit = Math.min(30, Math.max(1, parseInt(req.query.limit, 10) || 9));
     const skip = (page - 1) * limit;
 
-    const filter = {};
+    const filter = { approved: true };
     if (req.query.status) {
       filter.status = { $in: req.query.status.split(',') };
     } else {
@@ -100,6 +100,19 @@ async function getEvent(req, res, next) {
 
     if (!event) {
       return res.status(404).json({ success: false, message: 'Event not found.' });
+    }
+    if (!event.approved) {
+      if (!req.user) {
+        return res.status(404).json({ success: false, message: 'Event not found.' });
+      }
+      if (req.user.role === 'admin') {
+        // allow
+      } else {
+        const ngo = await NGO.findById(event.ngoId);
+        if (!ngo || !canManageNGO(req.user, ngo)) {
+          return res.status(404).json({ success: false, message: 'Event not found.' });
+        }
+      }
     }
 
     const doc = shapeEvent(event);
@@ -226,6 +239,12 @@ async function createEvent(req, res, next) {
         message: 'This organisation is suspended and cannot create new activities.',
       });
     }
+    if (!ngo.approved && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'This NGO must be approved by an admin before creating events.',
+      });
+    }
 
     const event = await Event.create({
       title,
@@ -243,7 +262,8 @@ async function createEvent(req, res, next) {
       ngoId,
       requiredVolunteers: requiredVolunteers || undefined,
       registeredVolunteers: 0,
-      status: status || 'upcoming',
+      status: 'pending_approval',
+      approved: false,
     });
 
     const populated = await Event.findById(event._id).populate(populate);
@@ -252,11 +272,11 @@ async function createEvent(req, res, next) {
       action: 'event.create',
       entityType: 'Event',
       entityId: event._id,
-      summary: `Created "${event.title}"`,
+      summary: `Created "${event.title}" (pending approval)`,
       meta: { ngoId: String(event.ngoId), status: event.status },
     });
 
-    return res.status(201).json({ success: true, message: 'Event created.', data: shapeEvent(populated) });
+    return res.status(201).json({ success: true, message: 'Event created. It is pending admin approval before volunteers can participate.', data: shapeEvent(populated) });
   } catch (error) {
     next(error);
   }

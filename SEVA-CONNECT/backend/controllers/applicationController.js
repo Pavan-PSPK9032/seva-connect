@@ -77,6 +77,13 @@ async function apply(req, res, next) {
     if (event.status !== 'upcoming' && event.status !== 'ongoing') {
       return res.status(400).json({ success: false, message: 'This opportunity is no longer accepting applications.' });
     }
+    if (!event.approved) {
+      return res.status(400).json({ success: false, message: 'This opportunity is pending admin approval.' });
+    }
+    const ngo = await NGO.findById(event.ngoId);
+    if (ngo && !ngo.approved) {
+      return res.status(400).json({ success: false, message: 'This NGO is pending admin approval.' });
+    }
     if (event.applicationDeadline && new Date(event.applicationDeadline).getTime() < Date.now()) {
       return res.status(400).json({ success: false, message: 'The application deadline for this opportunity has passed.' });
     }

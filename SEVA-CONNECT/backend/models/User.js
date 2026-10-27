@@ -106,14 +106,10 @@ const userSchema = new mongoose.Schema({
     enum: ['volunteer', 'admin', 'ngo'],
     default: 'volunteer',
   },
-  // Email verification. New accounts start unverified and cannot use protected
-  // features until the emailed OTP is confirmed. Accounts created before this
-  // field existed have no value stored at all; because there is deliberately no
-  // schema default here, Mongoose keeps them `undefined` and
-  // `isEmailVerified()` treats them as verified so existing users keep working.
-  // Registration always writes `emailVerified: false` explicitly.
+  // Email verification removed - all new accounts are verified by default
   emailVerified: {
     type: Boolean,
+    default: true,
   },
   emailVerifiedAt: {
     type: Date,

@@ -86,19 +86,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return res.user;
   };
 
-  /**
-   * Registration no longer signs the user in. It returns the address that a
-   * verification code was sent to; the caller routes to /verify-email.
-   */
   const register = async (input: RegisterInput): Promise<RegisterResult> => {
-    const res = await apiPost<VerificationChallenge>('/auth/register', input);
-    if (!res.success) throw new Error(res.message || 'Registration failed');
+    const res = await apiPost<AuthResult>('/auth/register', input);
+    if (!res.success || !res.token || !res.user) throw new Error(res.message || 'Registration failed');
+    persist({ token: res.token, user: res.user });
     return {
-      email: res.email || input.email,
+      email: res.user.email || input.email,
       message: res.message,
-      expiresInSeconds: res.expiresInSeconds,
-      resendAfterSeconds: res.resendAfterSeconds,
-    };
+      user: res.user,
+      token: res.token,
+    } as any;
   };
 
   /** Consume the OTP and sign in atomically on success. */

@@ -55,6 +55,20 @@ const ngoSchema = new mongoose.Schema({
     maxlength: [1000, 'Verification note cannot exceed 1000 characters'],
     default: '',
   },
+  // Admin approval status - NGO must be approved by admin before users can participate
+  approved: {
+    type: Boolean,
+    default: false,
+  },
+  approvedAt: {
+    type: Date,
+    default: null,
+  },
+  approvedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null,
+  },
   verifiedAt: {
     type: Date,
     default: null,

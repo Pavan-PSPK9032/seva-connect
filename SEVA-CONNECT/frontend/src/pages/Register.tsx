@@ -74,16 +74,8 @@ export default function Register() {
         skills,
         acceptTerms: values.acceptTerms,
       });
-      toast('success', 'Check your email', `We sent a six-digit code to ${result.email}.`);
-      navigate('/verify-email', {
-        replace: true,
-        state: {
-          email: result.email,
-          expiresInSeconds: result.expiresInSeconds ?? 5 * 60,
-          resendAfterSeconds: result.resendAfterSeconds ?? 60,
-          justRegistered: true,
-        },
-      });
+      toast('success', 'Account created', 'Welcome to Seva Connect!');
+      navigate(homeForRole((result as any).user?.role || values.role), { replace: true });
     } catch (err) {
       const message = apiErrorMessage(err, 'Registration failed. Please try again.');
       const status = (err as { response?: { status?: number } })?.response?.status;
@@ -150,8 +142,7 @@ export default function Register() {
         <div className="mt-5 flex items-start gap-2 rounded-xl bg-primary-50 px-3 py-2 text-xs text-primary-800 dark:bg-primary-500/10 dark:text-primary-200">
           <MailCheck className="mt-0.5 h-4 w-4 shrink-0" />
           <p>
-            We&apos;ll email a six-digit code to confirm your address. Your account is created only
-            after the code is verified.
+            Create your account to start volunteering or managing your NGO. You can join events after NGOs are approved by the admin.
           </p>
         </div>
 
@@ -290,7 +281,7 @@ export default function Register() {
 
           <button type="submit" disabled={isSubmitting} className="btn-primary w-full">
             {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
-            {isSubmitting ? 'Sending verification code…' : 'Create account'}
+            {isSubmitting ? 'Creating account…' : 'Create account'}
           </button>
         </form>
 

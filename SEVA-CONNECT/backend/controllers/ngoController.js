@@ -25,7 +25,7 @@ async function getNGOs(req, res, next) {
     const limit = Math.min(30, Math.max(1, parseInt(req.query.limit, 10) || 9));
     const skip = (page - 1) * limit;
 
-    const filter = { status: { $ne: 'suspended' } };
+    const filter = { status: { $ne: 'suspended' }, approved: true };
     const q = (req.query.q || '').trim();
     if (q) {
       filter.$or = [
@@ -82,12 +82,14 @@ async function createNGO(req, res, next) {
       website: website || '',
       logo: logo || '',
       createdBy: req.user._id,
-      verificationRequested: true,
+      verified: false,
+      verificationRequested: false,
+      approved: false,
     });
 
     return res.status(201).json({
       success: true,
-      message: 'NGO created. It is pending verification review.',
+      message: 'NGO created. It is pending admin approval before users can participate.',
       data: ngo,
     });
   } catch (error) {
@@ -171,6 +173,11 @@ async function getNGO(req, res, next) {
     }
     if (ngo.status === 'suspended') {
       return res.status(404).json({ success: false, message: 'NGO not found.' });
+    }
+    if (!ngo.approved && (!req.user || req.user.role !== 'admin')) {
+      if (!canManageNGO(req.user || {}, ngo)) {
+        return res.status(404).json({ success: false, message: 'NGO not found.' });
+      }
     }
 
     const [events, completedEvents, totalHours, volunteers] = await Promise.all([

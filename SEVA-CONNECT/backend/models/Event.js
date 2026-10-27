@@ -71,8 +71,22 @@ const eventSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['draft', 'upcoming', 'ongoing', 'completed', 'cancelled', 'archived'],
-    default: 'upcoming',
+    enum: ['draft', 'pending_approval', 'upcoming', 'ongoing', 'completed', 'cancelled', 'archived'],
+    default: 'pending_approval',
+  },
+  // Admin approval
+  approved: {
+    type: Boolean,
+    default: false,
+  },
+  approvedAt: {
+    type: Date,
+    default: null,
+  },
+  approvedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null,
   },
   createdAt: {
     type: Date,

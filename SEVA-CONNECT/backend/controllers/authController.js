@@ -197,10 +197,7 @@ async function deliverOtp({ email, pendingRegistration, user, ip, res }) {
 }
 
 // POST /api/auth/register
-// Inputs are pre-validated by express-validator in the route (email format,
-// password length, role whitelist volunteer/ngo only — admin is never public).
-// No User document is created here. The form data travels with the OTP
-// challenge and the account is inserted only after the code is verified.
+// Direct registration without email verification
 async function register(req, res, next) {
   try {
     const email = normalizeEmail(req.body.email);
@@ -218,18 +215,6 @@ async function register(req, res, next) {
 
     const existing = await User.findOne({ email });
     if (existing) {
-      // An unverified account is not a dead end: let the client continue to the
-      // verification screen instead of telling the person to log in.
-      if (!isEmailVerified(existing)) {
-        return res.status(409).json({
-          success: false,
-          code: 'EMAIL_NOT_VERIFIED',
-          verificationRequired: true,
-          email,
-          message:
-            'This email is already registered but not verified. Enter the code we emailed you, or request a new one.',
-        });
-      }
       return res.status(409).json({
         success: false,
         code: 'EMAIL_TAKEN',
@@ -237,40 +222,30 @@ async function register(req, res, next) {
       });
     }
 
-    // A pending registration already owns this address until its code expires.
-    // Do not overwrite its password or name; route the person to verification
-    // (where they can resend) instead.
-    const pending = await findPendingChallenge(email);
-    if (pending && !pending.consumedAt && pending.expiresAt.getTime() > Date.now()) {
-      return res.status(409).json({
-        success: false,
-        code: 'EMAIL_NOT_VERIFIED',
-        verificationRequired: true,
-        email,
-        message:
-          'This email is already awaiting verification. Enter the code we sent you, or request a new one.',
-      });
-    }
-
-    const pendingRegistration = await buildPendingRegistration(req.body);
-
-    // issueOtp checks the cooldown/hourly caps before writing anything, and
-    // deletes the challenge if SMTP refuses the message. No account is created
-    // on any failure path.
-    const failed = await deliverOtp({
+    const user = new User({
+      name: String(req.body.name || '').trim(),
       email,
-      pendingRegistration,
-      ip: req.ip,
-      res,
+      password: String(req.body.password),
+      role: req.body.role === 'ngo' ? 'ngo' : 'volunteer',
+      phone: String(req.body.phone || '').trim(),
+      skills: Array.isArray(req.body.skills) ? req.body.skills.filter(Boolean) : cleanList(req.body.skills),
+      interests: Array.isArray(req.body.interests) ? req.body.interests.filter(Boolean) : cleanList(req.body.interests),
+      emailVerified: true,
+      emailVerifiedAt: new Date(),
+      termsAcceptedAt: req.body.acceptTerms ? new Date() : null,
+      authProvider: 'password',
     });
-    if (failed) return failed;
 
-    return res.status(201).json(
-      verificationPayload(email, {
-        message:
-          'Check your email for a six-digit code. Your account will be created once the code is verified.',
-      })
-    );
+    await user.save();
+
+    const token = signToken(user._id);
+
+    return res.status(201).json({
+      success: true,
+      token,
+      user,
+      message: 'Account created successfully.',
+    });
   } catch (error) {
     next(error);
   }
