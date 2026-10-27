@@ -9,12 +9,14 @@ interface VerifyState {
   email?: string;
   justRegistered?: boolean;
   resendAfterSeconds?: number;
+  expiresInSeconds?: number;
   from?: string;
 }
 
 const CODE_LENGTH = 6;
 const EXPIRY_SECONDS = 5 * 60;
 const DEFAULT_COOLDOWN = 60;
+const PENDING_EMAIL_KEY = 'sc_pending_email';
 
 function formatTime(seconds: number): string {
   const safe = Math.max(0, seconds);
@@ -34,17 +36,25 @@ export default function VerifyEmail() {
   const location = useLocation();
   const state = (location.state as VerifyState | null) || {};
 
-  const [email, setEmail] = useState(state.email || '');
+  const [email, setEmail] = useState(
+    () => state.email || (typeof window !== 'undefined' ? sessionStorage.getItem(PENDING_EMAIL_KEY) || '' : '')
+  );
   const [digits, setDigits] = useState<string[]>(Array(CODE_LENGTH).fill(''));
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [verifying, setVerifying] = useState(false);
   const [resending, setResending] = useState(false);
   const [cooldown, setCooldown] = useState(state.resendAfterSeconds ?? DEFAULT_COOLDOWN);
-  const [expiresIn, setExpiresIn] = useState(EXPIRY_SECONDS);
+  const [expiresIn, setExpiresIn] = useState(state.expiresInSeconds ?? EXPIRY_SECONDS);
   const inputs = useRef<Array<HTMLInputElement | null>>([]);
+  const verifyingRef = useRef(false);
 
   const code = useMemo(() => digits.join(''), [digits]);
+  const expired = expiresIn <= 0;
+
+  useEffect(() => {
+    if (email) sessionStorage.setItem(PENDING_EMAIL_KEY, email);
+  }, [email]);
 
   useEffect(() => {
     inputs.current[0]?.focus();
@@ -108,6 +118,9 @@ export default function VerifyEmail() {
   };
 
   const submit = useCallback(async () => {
+    // A ref, not state: the auto-submit effect and a fast double click can both
+    // fire before React re-renders with `verifying = true`.
+    if (verifyingRef.current) return;
     if (!email) {
       setError('Enter the email address you registered with.');
       return;
@@ -117,33 +130,58 @@ export default function VerifyEmail() {
       return;
     }
 
+    verifyingRef.current = true;
     setVerifying(true);
     setError(null);
     setInfo(null);
     try {
       const user = await verifyEmail(email, code);
+      sessionStorage.removeItem(PENDING_EMAIL_KEY);
       toast('success', 'Email verified', `Welcome to Seva Connect, ${user.name.split(' ')[0]}.`);
       navigate(state.from || homeForRole(user.role), { replace: true });
     } catch (err) {
       const message = apiErrorMessage(err, 'We could not verify that code. Please try again.');
-      const data = (err as { response?: { data?: { code?: string; attemptsRemaining?: number; retryAfter?: number } } })
-        ?.response?.data;
-      setError(
-        data?.code === 'OTP_INVALID' && typeof data.attemptsRemaining === 'number'
-          ? `${message} ${data.attemptsRemaining} attempt${data.attemptsRemaining === 1 ? '' : 's'} remaining.`
-          : message
-      );
+      const data = (err as {
+        response?: {
+          data?: { code?: string; attemptsRemaining?: number; retryAfter?: number; email?: string };
+        };
+      })?.response?.data;
+      const errorCode = data?.code;
+
+      if (errorCode === 'OTP_INVALID' && typeof data?.attemptsRemaining === 'number') {
+        setError(
+          `${message} ${data.attemptsRemaining} attempt${data.attemptsRemaining === 1 ? '' : 's'} remaining.`
+        );
+      } else if (errorCode === 'OTP_EXPIRED') {
+        // The server refuses the old code; the countdown must stop claiming it
+        // is still valid and the person must request a fresh one.
+        setExpiresIn(0);
+        setError(message);
+      } else if (errorCode === 'OTP_LOCKED') {
+        setExpiresIn(0);
+        setError(message);
+      } else if (errorCode === 'EMAIL_TAKEN' || errorCode === 'ACCOUNT_SUSPENDED') {
+        // Terminal states: retyping the code cannot help, so point the person
+        // at the right next step instead of leaving them in a retry loop.
+        setError(message);
+        if (data?.email) setEmail(data.email);
+      } else {
+        setError(message);
+      }
+
       if (data?.retryAfter) setCooldown(data.retryAfter);
       setDigits(Array(CODE_LENGTH).fill(''));
       inputs.current[0]?.focus();
     } finally {
+      verifyingRef.current = false;
       setVerifying(false);
     }
   }, [code, email, navigate, state.from, toast, verifyEmail]);
 
-  // Verify automatically once all six digits are present.
+  // Verify automatically once all six digits are present. The ref inside
+  // submit() prevents a duplicate request when the effect re-runs.
   useEffect(() => {
-    if (code.length === CODE_LENGTH && !verifying) {
+    if (code.length === CODE_LENGTH && !expired) {
       void submit();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -159,7 +197,7 @@ export default function VerifyEmail() {
       setDigits(Array(CODE_LENGTH).fill(''));
       inputs.current[0]?.focus();
       setCooldown(result.retryAfter ?? DEFAULT_COOLDOWN);
-      setExpiresIn(EXPIRY_SECONDS);
+      setExpiresIn(result.expiresInSeconds ?? EXPIRY_SECONDS);
       setInfo(result.message || 'A new code has been sent. Previous codes are no longer valid.');
       toast('success', 'New code sent', 'The previous code has been invalidated.');
     } catch (err) {
@@ -184,7 +222,7 @@ export default function VerifyEmail() {
             Enter the six-digit code we sent to{' '}
             <span className="font-semibold text-navy-700 dark:text-slate-200">{email || 'your email address'}</span>.
           </p>
-          {!state.email && (
+          {!email && (
             <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">
               We could not read the address from this page. Type it below to continue.
             </p>
@@ -214,6 +252,11 @@ export default function VerifyEmail() {
         {info && (
           <div role="status" className="mt-5 rounded-xl border border-primary-200 bg-primary-50 px-4 py-3 text-sm text-primary-800 dark:border-primary-500/30 dark:bg-primary-500/10 dark:text-primary-200">
             {info}
+          </div>
+        )}
+        {expired && !error && (
+          <div role="status" className="mt-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+            This code has expired. Request a new one to finish verifying your email.
           </div>
         )}
 
@@ -251,9 +294,13 @@ export default function VerifyEmail() {
             </div>
           </fieldset>
 
-          <button type="submit" disabled={verifying || code.length !== CODE_LENGTH} className="btn-primary mt-6 w-full">
+          <button
+            type="submit"
+            disabled={verifying || code.length !== CODE_LENGTH || expired}
+            className="btn-primary mt-6 w-full"
+          >
             {verifying ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
-            {verifying ? 'Verifying…' : 'Verify email'}
+            {verifying ? 'Verifying…' : expired ? 'Code expired' : 'Verify email'}
           </button>
         </form>
 
@@ -268,7 +315,9 @@ export default function VerifyEmail() {
             {cooldown > 0 ? `Resend code in ${formatTime(cooldown)}` : 'Resend code'}
           </button>
           <p className="text-xs text-slate-500">
-            The code expires in <span className="font-semibold">{formatTime(expiresIn)}</span>. Older codes stop working when you resend.
+            {expired
+              ? 'Request a new code to continue — older codes cannot be used.'
+              : <>The code expires in <span className="font-semibold">{formatTime(expiresIn)}</span>. Older codes stop working when you resend.</>}
           </p>
         </div>
 

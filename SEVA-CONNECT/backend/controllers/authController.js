@@ -7,13 +7,18 @@
  * returned in a response, written to logs, or sent to the browser.
  */
 const crypto = require('crypto');
+const bcrypt = require('bcryptjs');
 const User = require('../models/User');
+const EmailVerification = require('../models/EmailVerification');
 const signToken = require('../utils/generateToken');
 const { normalizeEmail, isEmailVerified } = require('../utils/email');
 const { sendMail, smtpConfigured } = require('../services/mailer');
 const { issueOtp, verifyOtp } = require('../services/otpService');
+const googleAuth = require('../services/googleAuth');
 const { notify } = require('../services/notificationService');
 const { getPlatformSettings } = require('../services/settingsService');
+
+const BCRYPT_ROUNDS = 10;
 
 const DUPLICATE_EMAIL_MESSAGE =
   'An account with this email already exists. Please log in or reset your password.';
@@ -73,12 +78,131 @@ function deliveryErrorResponse(status) {
   return null;
 }
 
+function cleanList(value, limit = 20) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => String(item).trim())
+    .filter(Boolean)
+    .slice(0, limit);
+}
+
+/**
+ * Build the data that waits with the OTP challenge. The password is hashed
+ * here, so even the pending record never contains the plaintext password.
+ */
+async function buildPendingRegistration(body) {
+  return {
+    name: String(body.name || '').trim(),
+    passwordHash: await bcrypt.hash(String(body.password), BCRYPT_ROUNDS),
+    role: body.role === 'ngo' ? 'ngo' : 'volunteer',
+    phone: String(body.phone || '').trim(),
+    skills: cleanList(body.skills),
+    interests: cleanList(body.interests),
+    profileImage: String(body.profileImage || '').trim(),
+    termsAcceptedAt: body.acceptTerms ? new Date() : null,
+  };
+}
+
+/**
+ * Newest challenge that still carries pending registration data. It is looked
+ * up even when consumed, so a resend/recovery after an expired or locked code
+ * can reuse the original form data instead of asking for it again.
+ */
+function findPendingChallenge(email) {
+  return EmailVerification.findOne({
+    email,
+    purpose: 'registration',
+    pendingRegistration: { $ne: null },
+  }).sort({ createdAt: -1 });
+}
+
+/**
+ * Create the verified account from the data held by the OTP challenge.
+ *
+ * The User unique-email index is the final arbiter: if another request wins the
+ * race, the duplicate-key error is translated into a sign-in for an unverified
+ * record or a clear 409 for an already-verified one. No partially-created user
+ * is ever left behind.
+ */
+async function createAccountFromPending(email, pending) {
+  const existing = await User.findOne({ email });
+
+  if (existing) {
+    if (isEmailVerified(existing)) return { status: 'taken' };
+    const verified = await User.findOneAndUpdate(
+      { _id: existing._id, emailVerified: { $ne: true } },
+      { $set: { emailVerified: true, emailVerifiedAt: new Date() } },
+      { new: true }
+    );
+    return verified ? { status: 'ok', user: verified, created: false } : { status: 'taken' };
+  }
+
+  const user = new User({
+    name: pending.name,
+    email,
+    password: pending.passwordHash,
+    role: pending.role === 'ngo' ? 'ngo' : 'volunteer',
+    phone: pending.phone || '',
+    skills: pending.skills || [],
+    interests: pending.interests || [],
+    profileImage: pending.profileImage || '',
+    emailVerified: true,
+    emailVerifiedAt: new Date(),
+    termsAcceptedAt: pending.termsAcceptedAt || new Date(),
+    authProvider: 'password',
+  });
+  // The pending record already holds a bcrypt hash; do not hash it twice.
+  user.$locals.passwordAlreadyHashed = true;
+
+  try {
+    await user.save();
+    return { status: 'ok', user, created: true };
+  } catch (error) {
+    if (!error || error.code !== 11000) throw error;
+
+    // A concurrent verifier (or a Google signup) inserted the address first.
+    const raced = await User.findOne({ email });
+    if (!raced) throw error;
+    if (isEmailVerified(raced)) return { status: 'taken' };
+
+    const verified = await User.findOneAndUpdate(
+      { _id: raced._id, emailVerified: { $ne: true } },
+      { $set: { emailVerified: true, emailVerifiedAt: new Date() } },
+      { new: true }
+    );
+    return verified ? { status: 'ok', user: verified, created: false } : { status: 'taken' };
+  }
+}
+
+/** Issue the challenge and turn service statuses into a response. */
+async function deliverOtp({ email, pendingRegistration, user, ip, res }) {
+  const issued = await issueOtp({ email, pendingRegistration, user, ip });
+
+  if (issued.status === 'sent') return null;
+
+  const failure = deliveryErrorResponse(issued.status);
+  if (failure) {
+    return res.status(failure.status).json({
+      ...failure.body,
+      ...(issued.retryAfter ? { retryAfter: issued.retryAfter } : {}),
+    });
+  }
+
+  return res.status(503).json({
+    success: false,
+    code: 'EMAIL_DELIVERY_FAILED',
+    message:
+      'We could not send the verification email right now. Please try again in a few minutes.',
+  });
+}
+
 // POST /api/auth/register
 // Inputs are pre-validated by express-validator in the route (email format,
 // password length, role whitelist volunteer/ngo only — admin is never public).
+// No User document is created here. The form data travels with the OTP
+// challenge and the account is inserted only after the code is verified.
 async function register(req, res, next) {
   try {
-    const { name, password, phone, skills, interests, profileImage } = req.body;
     const email = normalizeEmail(req.body.email);
 
     const settings = await getPlatformSettings();
@@ -113,59 +237,38 @@ async function register(req, res, next) {
       });
     }
 
-    let user;
-    try {
-      user = await User.create({
-        name,
-        email,
-        password,
-        role: req.body.role || 'volunteer',
-        phone: phone || '',
-        skills: Array.isArray(skills) ? skills.map((s) => String(s).trim()).filter(Boolean) : [],
-        interests: Array.isArray(interests) ? interests.map((s) => String(s).trim()).filter(Boolean) : [],
-        profileImage: profileImage || '',
-        emailVerified: false,
-        termsAcceptedAt: req.body.acceptTerms ? new Date() : null,
-      });
-    } catch (error) {
-      // Two simultaneous requests can both pass the check above; the unique
-      // email index then rejects the second insert.
-      if (error && error.code === 11000) {
-        return res.status(409).json({
-          success: false,
-          code: 'EMAIL_TAKEN',
-          message: DUPLICATE_EMAIL_MESSAGE,
-        });
-      }
-      throw error;
-    }
-
-    // `forceCooldown` is false: a brand-new account cannot have a recent send,
-    // and the cooldown/rate limits still apply if it somehow does.
-    const issued = await issueOtp({ email, user, ip: req.ip });
-
-    if (issued.status !== 'sent') {
-      // Never leave a half-registered account behind when the code could not go
-      // out: the person would be stuck with an email address they cannot reuse.
-      await User.deleteOne({ _id: user._id });
-      const failure = deliveryErrorResponse(issued.status);
-      if (failure) {
-        return res.status(failure.status).json({
-          ...failure.body,
-          ...(issued.retryAfter ? { retryAfter: issued.retryAfter } : {}),
-        });
-      }
-      return res.status(503).json({
+    // A pending registration already owns this address until its code expires.
+    // Do not overwrite its password or name; route the person to verification
+    // (where they can resend) instead.
+    const pending = await findPendingChallenge(email);
+    if (pending && !pending.consumedAt && pending.expiresAt.getTime() > Date.now()) {
+      return res.status(409).json({
         success: false,
-        code: 'EMAIL_DELIVERY_FAILED',
+        code: 'EMAIL_NOT_VERIFIED',
+        verificationRequired: true,
+        email,
         message:
-          'We could not send the verification email right now. Please try again in a few minutes.',
+          'This email is already awaiting verification. Enter the code we sent you, or request a new one.',
       });
     }
+
+    const pendingRegistration = await buildPendingRegistration(req.body);
+
+    // issueOtp checks the cooldown/hourly caps before writing anything, and
+    // deletes the challenge if SMTP refuses the message. No account is created
+    // on any failure path.
+    const failed = await deliverOtp({
+      email,
+      pendingRegistration,
+      ip: req.ip,
+      res,
+    });
+    if (failed) return failed;
 
     return res.status(201).json(
       verificationPayload(email, {
-        message: 'Account created. Enter the verification code we emailed you.',
+        message:
+          'Check your email for a six-digit code. Your account will be created once the code is verified.',
       })
     );
   } catch (error) {
@@ -174,7 +277,8 @@ async function register(req, res, next) {
 }
 
 // POST /api/auth/verify-email
-// Atomically consumes the OTP, marks the account verified and issues a token.
+// Atomically consumes the OTP, creates (or verifies) the account exactly once,
+// then issues a token.
 async function verifyEmail(req, res, next) {
   try {
     const email = normalizeEmail(req.body.email);
@@ -207,17 +311,33 @@ async function verifyEmail(req, res, next) {
       });
     }
 
-    // Mark verification exactly once. The conditional update means two parallel
-    // successful checks cannot both "complete" a registration.
-    const user = await User.findOneAndUpdate(
-      { email, emailVerified: { $ne: true } },
-      { $set: { emailVerified: true, emailVerifiedAt: new Date() } },
-      { new: true }
-    );
+    let account;
+    let created = false;
 
-    // Already verified (for example the same code was replayed after success):
-    // treat it as a normal login rather than an error.
-    const account = user || (await User.findOne({ email }));
+    if (result.pendingRegistration) {
+      const outcome = await createAccountFromPending(email, result.pendingRegistration);
+      if (outcome.status === 'taken') {
+        return res.status(409).json({
+          success: false,
+          code: 'EMAIL_TAKEN',
+          message: DUPLICATE_EMAIL_MESSAGE,
+        });
+      }
+      account = outcome.user;
+      created = outcome.created;
+    } else {
+      // Legacy flow: the User document already existed (unverified), so only
+      // the verification flag has to be flipped.
+      const verified = await User.findOneAndUpdate(
+        { email, emailVerified: { $ne: true } },
+        { $set: { emailVerified: true, emailVerifiedAt: new Date() } },
+        { new: true }
+      );
+      // Already verified (for example the same code was replayed after success):
+      // treat it as a normal login rather than an error.
+      account = verified || (await User.findOne({ email }));
+      created = Boolean(verified);
+    }
 
     if (!account) {
       return res.status(404).json({
@@ -235,13 +355,12 @@ async function verifyEmail(req, res, next) {
       });
     }
 
-    const previousLogin = account.lastLoginAt;
     account.lastLoginAt = new Date();
-    if (user || !previousLogin) await account.save({ validateBeforeSave: false });
+    await account.save({ validateBeforeSave: false });
 
-    if (user) {
+    if (created) {
       void notify({
-        recipient: user._id,
+        recipient: account._id,
         type: 'system',
         title: 'Email verified',
         message: 'Your email address is verified. Welcome to Seva Connect!',
@@ -276,36 +395,40 @@ async function resendVerification(req, res, next) {
 
     const user = await User.findOne({ email });
 
-    // Generic answer for unknown or already-verified addresses so this endpoint
-    // cannot be used to enumerate accounts.
-    if (!user || isEmailVerified(user)) {
+    // Generic answer for unknown, suspended or already-verified addresses so
+    // this endpoint cannot be used to enumerate accounts.
+    if (user && (isEmailVerified(user) || user.accountStatus === 'suspended')) {
       return res.json({ success: true, message: GENERIC_RESEND_MESSAGE });
     }
 
-    const issued = await issueOtp({ email, user, ip: req.ip });
-
-    if (issued.status === 'sent') {
-      return res.json(
-        verificationPayload(email, {
-          message: 'A new verification code has been sent.',
-        })
-      );
+    let pendingRegistration = null;
+    if (!user) {
+      const pending = await findPendingChallenge(email);
+      if (!pending) {
+        return res.json({ success: true, message: GENERIC_RESEND_MESSAGE });
+      }
+      pendingRegistration = pending.pendingRegistration
+        ? pending.pendingRegistration.toObject()
+        : null;
+      if (!pendingRegistration) {
+        return res.json({ success: true, message: GENERIC_RESEND_MESSAGE });
+      }
     }
 
-    const failure = deliveryErrorResponse(issued.status);
-    if (failure) {
-      return res.status(failure.status).json({
-        ...failure.body,
-        ...(issued.retryAfter ? { retryAfter: issued.retryAfter } : {}),
-      });
-    }
-
-    return res.status(503).json({
-      success: false,
-      code: 'EMAIL_DELIVERY_FAILED',
-      message:
-        'We could not send the verification email right now. Please try again in a few minutes.',
+    const failed = await deliverOtp({
+      email,
+      user: user || undefined,
+      pendingRegistration,
+      ip: req.ip,
+      res,
     });
+    if (failed) return failed;
+
+    return res.json(
+      verificationPayload(email, {
+        message: 'A new verification code has been sent. Older codes no longer work.',
+      })
+    );
   } catch (error) {
     next(error);
   }
@@ -318,11 +441,16 @@ async function login(req, res, next) {
     const email = normalizeEmail(req.body.email);
 
     const user = await User.findOne({ email }).select('+password');
-    // Single generic message so we never reveal whether an email exists.
-    if (!user || !(await user.comparePassword(password))) {
+    // Single generic message so we never reveal whether an email exists. A
+    // Google-only account has no password hash, so a password attempt fails
+    // exactly like an unknown address; the message still points people to the
+    // right method without confirming an account.
+    if (!user || !user.password || !(await user.comparePassword(password))) {
       return res.status(401).json({
         success: false,
-        message: 'Invalid email or password.',
+        code: 'INVALID_CREDENTIALS',
+        message:
+          'Invalid email or password. If you signed up with Google, use “Continue with Google”.',
       });
     }
 
@@ -352,6 +480,237 @@ async function login(req, res, next) {
       success: true,
       message: 'Logged in successfully.',
       token: signToken({ id: user._id }, user),
+      user,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+// POST /api/auth/google
+// Verifies a Google Identity Services ID token and signs in or creates a
+// volunteer account. Email/password accounts are never auto-linked by email.
+async function googleSignIn(req, res, next) {
+  try {
+    if (!googleAuth.googleConfigured()) {
+      return res.status(503).json({
+        success: false,
+        code: 'GOOGLE_NOT_CONFIGURED',
+        message: 'Google sign-in is not configured on this server yet.',
+      });
+    }
+
+    const verification = await googleAuth.verifyGoogleIdToken(req.body.credential, {
+      nonce: req.body.nonce,
+    });
+
+    if (verification.status === 'unconfigured') {
+      return res.status(503).json({
+        success: false,
+        code: 'GOOGLE_NOT_CONFIGURED',
+        message: 'Google sign-in is not configured on this server yet.',
+      });
+    }
+
+    if (verification.status === 'expired') {
+      return res.status(401).json({
+        success: false,
+        code: 'GOOGLE_TOKEN_EXPIRED',
+        message: 'Your Google sign-in expired. Please try again.',
+      });
+    }
+
+    if (verification.status === 'email_unverified') {
+      return res.status(403).json({
+        success: false,
+        code: 'GOOGLE_EMAIL_UNVERIFIED',
+        message: 'Google has not verified this email address, so it cannot be used to sign in.',
+      });
+    }
+
+    if (verification.status !== 'ok') {
+      return res.status(401).json({
+        success: false,
+        code: 'GOOGLE_INVALID_CREDENTIAL',
+        message: 'Google sign-in could not be verified. Please try again.',
+      });
+    }
+
+    const { sub, email, name, picture } = verification.profile;
+
+    let user = await User.findOne({ googleId: sub });
+    let isNewUser = false;
+
+    if (!user) {
+      const existing = await User.findOne({ email });
+
+      if (existing) {
+        if (existing.googleId && existing.googleId !== sub) {
+          return res.status(409).json({
+            success: false,
+            code: 'GOOGLE_ACCOUNT_CONFLICT',
+            message:
+              'This email is already linked to a different Google account. Sign in with your password or contact support.',
+          });
+        }
+
+        // Never link a Google identity to a password account just because the
+        // email matches. The person must first prove they control the account
+        // (password login), then link Google from their profile.
+        return res.status(409).json({
+          success: false,
+          code: 'GOOGLE_LINK_REQUIRED',
+          message:
+            'An account with this email already exists. Log in with your password, then link Google from your profile.',
+        });
+      }
+
+      try {
+        user = await User.create({
+          name,
+          email,
+          googleId: sub,
+          authProvider: 'google',
+          profileImage: picture || '',
+          role: 'volunteer', // Google signup can never grant admin or NGO rights
+          emailVerified: true,
+          emailVerifiedAt: new Date(),
+          termsAcceptedAt: req.body.acceptTerms ? new Date() : null,
+        });
+        isNewUser = true;
+      } catch (error) {
+        if (!error || error.code !== 11000) throw error;
+
+        // Concurrent Google or email registration won the insert race.
+        const raced = await User.findOne({ $or: [{ googleId: sub }, { email }] });
+        if (!raced) throw error;
+
+        if (raced.googleId === sub) {
+          user = raced;
+        } else if (raced.googleId) {
+          return res.status(409).json({
+            success: false,
+            code: 'GOOGLE_ACCOUNT_CONFLICT',
+            message:
+              'This email is already linked to a different Google account. Sign in with your password or contact support.',
+          });
+        } else {
+          return res.status(409).json({
+            success: false,
+            code: 'GOOGLE_LINK_REQUIRED',
+            message:
+              'An account with this email already exists. Log in with your password, then link Google from your profile.',
+          });
+        }
+      }
+    }
+
+    if (user.accountStatus === 'suspended') {
+      return res.status(403).json({
+        success: false,
+        code: 'ACCOUNT_SUSPENDED',
+        message: 'This account is suspended. Please contact support.',
+      });
+    }
+
+    if (user.googleId !== sub) {
+      return res.status(409).json({
+        success: false,
+        code: 'GOOGLE_LINK_REQUIRED',
+        message:
+          'An account with this email already exists. Log in with your password, then link Google from your profile.',
+      });
+    }
+
+    // Google already verified the address, so no email OTP is required.
+    if (!isEmailVerified(user)) {
+      user.emailVerified = true;
+      user.emailVerifiedAt = new Date();
+    }
+
+    user.lastLoginAt = new Date();
+    user.lastGoogleLoginAt = new Date();
+    await user.save({ validateBeforeSave: false });
+
+    return res.json({
+      success: true,
+      message: isNewUser ? 'Account created with Google.' : 'Logged in with Google.',
+      token: signToken({ id: user._id }, user),
+      user,
+      isNewUser,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+// POST /api/auth/google/link  (protect)
+// Requires an authenticated session, so the caller has already proved account
+// ownership with their password. The Google email must match the account email.
+async function linkGoogle(req, res, next) {
+  try {
+    if (!googleAuth.googleConfigured()) {
+      return res.status(503).json({
+        success: false,
+        code: 'GOOGLE_NOT_CONFIGURED',
+        message: 'Google sign-in is not configured on this server yet.',
+      });
+    }
+
+    const verification = await googleAuth.verifyGoogleIdToken(req.body.credential, {
+      nonce: req.body.nonce,
+    });
+
+    if (verification.status !== 'ok') {
+      const expired = verification.status === 'expired';
+      return res.status(expired ? 401 : 400).json({
+        success: false,
+        code: expired ? 'GOOGLE_TOKEN_EXPIRED' : 'GOOGLE_INVALID_CREDENTIAL',
+        message: 'Google sign-in could not be verified. Please try again.',
+      });
+    }
+
+    const { sub, email } = verification.profile;
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'Account not found.' });
+    }
+
+    if (normalizeEmail(user.email) !== email) {
+      return res.status(409).json({
+        success: false,
+        code: 'GOOGLE_EMAIL_MISMATCH',
+        message:
+          'The Google account email must match your Seva Connect email address before it can be linked.',
+      });
+    }
+
+    if (user.googleId && user.googleId !== sub) {
+      return res.status(409).json({
+        success: false,
+        code: 'GOOGLE_ACCOUNT_CONFLICT',
+        message: 'A different Google account is already linked to this profile.',
+      });
+    }
+
+    const alreadyLinked = user.googleId === sub;
+
+    const other = await User.findOne({ googleId: sub, _id: { $ne: user._id } });
+    if (other) {
+      return res.status(409).json({
+        success: false,
+        code: 'GOOGLE_ACCOUNT_CONFLICT',
+        message: 'This Google account is already linked to another Seva Connect profile.',
+      });
+    }
+
+    user.googleId = sub;
+    user.lastGoogleLoginAt = new Date();
+    await user.save({ validateBeforeSave: false });
+
+    return res.json({
+      success: true,
+      message: alreadyLinked ? 'Google account already linked.' : 'Google account linked.',
       user,
     });
   } catch (error) {
@@ -497,6 +856,8 @@ module.exports = {
   resendVerification,
   login,
   logout,
+  googleSignIn,
+  linkGoogle,
   changePassword,
   forgotPassword,
   resetPassword,

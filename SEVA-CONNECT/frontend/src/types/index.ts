@@ -19,6 +19,8 @@ export interface User {
   emailVerifiedAt?: string | null;
   termsAcceptedAt?: string | null;
   lastLoginAt?: string | null;
+  authProvider?: 'password' | 'google';
+  googleLinked?: boolean;
   notificationPrefs?: NotificationPreferences;
   createdAt?: string;
 }
@@ -307,6 +309,7 @@ export interface ApiResponse<T> {
   resendAfterSeconds?: number;
   retryAfter?: number;
   attemptsRemaining?: number;
+  isNewUser?: boolean;
 }
 
 export interface VerificationChallenge {

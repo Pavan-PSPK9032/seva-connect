@@ -15,9 +15,20 @@ const validate = require('../middleware/validate');
 
 const limiterMessage = (message) => ({ success: false, message });
 
+// Route-level brute-force limits are intentionally high under NODE_ENV=test so
+// the integration suite can exercise many flows in one process. Per-challenge
+// OTP limits and the hourly send cap live in services/otpService.js and are
+// still enforced in tests. Production always uses the values shown here.
+const testMode = process.env.NODE_ENV === 'test';
+const authMax = testMode ? 1000 : 20;
+const verifyMax = testMode ? 1000 : 30;
+const resendMax = testMode ? 1000 : 6;
+const passwordMax = testMode ? 1000 : 10;
+const googleMax = testMode ? 1000 : 20;
+
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 20,
+  max: authMax,
   standardHeaders: true,
   legacyHeaders: false,
   message: limiterMessage('Too many attempts. Please try again later.'),
@@ -27,7 +38,7 @@ const authLimiter = rateLimit({
 // normal amount of typos while still cutting off automated guessing.
 const verifyLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 30,
+  max: verifyMax,
   standardHeaders: true,
   legacyHeaders: false,
   message: limiterMessage('Too many verification attempts. Please try again later.'),
@@ -35,15 +46,23 @@ const verifyLimiter = rateLimit({
 
 const resendLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 6,
+  max: resendMax,
   standardHeaders: true,
   legacyHeaders: false,
   message: limiterMessage('Too many code requests. Please try again later.'),
 });
 
+const googleLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: googleMax,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: limiterMessage('Too many Google sign-in attempts. Please try again later.'),
+});
+
 const passwordLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 10,
+  max: passwordMax,
   standardHeaders: true,
   legacyHeaders: false,
   message: limiterMessage('Too many password attempts. Please try again later.'),
@@ -71,9 +90,8 @@ const registerRules = [
   body('skills').optional().isArray({ max: 20 }).withMessage('Skills must be an array'),
   body('interests').optional().isArray({ max: 20 }).withMessage('Interests must be an array'),
   body('acceptTerms')
-    .optional()
-    .isBoolean()
-    .withMessage('Terms acceptance must be true or false'),
+    .custom((value) => value === true)
+    .withMessage('Please accept the terms and privacy policy to continue'),
 ];
 
 const verifyRules = [
@@ -86,6 +104,20 @@ const verifyRules = [
 
 const resendRules = [
   body('email').trim().isEmail().withMessage('Please provide a valid email address').normalizeEmail(),
+];
+
+const googleRules = [
+  body('credential')
+    .isString()
+    .withMessage('Google credential is required')
+    .isLength({ min: 20, max: 8192 })
+    .withMessage('Google credential is invalid'),
+  body('nonce')
+    .optional({ values: 'falsy' })
+    .isString()
+    .isLength({ max: 128 })
+    .withMessage('Google nonce is invalid'),
+  body('acceptTerms').optional().isBoolean().withMessage('Terms acceptance must be true or false'),
 ];
 
 const loginRules = [
@@ -124,6 +156,15 @@ router.post(
 );
 
 router.post('/login', authLimiter, loginRules, validate, authController.login);
+router.post('/google', googleLimiter, googleRules, validate, authController.googleSignIn);
+router.post(
+  '/google/link',
+  protect,
+  googleLimiter,
+  googleRules,
+  validate,
+  authController.linkGoogle
+);
 router.post('/logout', protect, authController.logout);
 router.post('/logout-all', protect, authController.logout);
 

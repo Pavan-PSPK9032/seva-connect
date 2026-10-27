@@ -7,8 +7,29 @@
  *
  * A new challenge invalidates any older open challenge for the same address
  * (see services/otpService.js), so a resend can never leave two valid codes.
+ *
+ * For a brand-new registration the account does not exist yet. The form data
+ * needed to create it (including an already-hashed password) travels with the
+ * challenge and is deleted by Mongo once the challenge expires. The account is
+ * only inserted after a successful OTP check.
  */
 const mongoose = require('mongoose');
+
+const pendingRegistrationSchema = new mongoose.Schema(
+  {
+    name: { type: String, trim: true, maxlength: 60, required: true },
+    // bcrypt hash produced by the controller; the plaintext password is never
+    // stored here (or anywhere else) before verification succeeds.
+    passwordHash: { type: String, required: true },
+    role: { type: String, enum: ['volunteer', 'ngo'], default: 'volunteer' },
+    phone: { type: String, trim: true, default: '' },
+    skills: { type: [String], default: [] },
+    interests: { type: [String], default: [] },
+    profileImage: { type: String, default: '' },
+    termsAcceptedAt: { type: Date, default: null },
+  },
+  { _id: false }
+);
 
 const emailVerificationSchema = new mongoose.Schema({
   email: {
@@ -26,6 +47,12 @@ const emailVerificationSchema = new mongoose.Schema({
   userId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
+    default: null,
+  },
+  // Present only for registrations where the User document does not exist yet.
+  // Legacy unverified accounts keep using `userId` instead.
+  pendingRegistration: {
+    type: pendingRegistrationSchema,
     default: null,
   },
   otpHash: {
@@ -76,5 +103,15 @@ emailVerificationSchema.index({ email: 1, purpose: 1, consumedAt: 1, createdAt: 
 // Mongo removes expired challenges a day after they lapse. Security never
 // relies on this TTL: every check also compares expiresAt explicitly.
 emailVerificationSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 86400 });
+
+emailVerificationSchema.set('toJSON', {
+  transform(doc, ret) {
+    delete ret.otpHash;
+    delete ret.requestIp;
+    if (ret.pendingRegistration) delete ret.pendingRegistration.passwordHash;
+    delete ret.__v;
+    return ret;
+  },
+});
 
 module.exports = mongoose.model('EmailVerification', emailVerificationSchema);

@@ -27,9 +27,32 @@ const userSchema = new mongoose.Schema({
   },
   password: {
     type: String,
-    required: [true, 'Password is required'],
+    // Google-created accounts have no local password; every other account does.
+    required: [
+      function requiredPassword() {
+        return !this.googleId;
+      },
+      'Password is required',
+    ],
     minlength: [6, 'Password must be at least 6 characters'],
     select: false, // excluded from queries unless explicitly requested
+  },
+  // Stable Google subject identifier. Sparse and unique so legacy/password
+  // accounts without a Google link do not collide with each other.
+  googleId: {
+    type: String,
+    unique: true,
+    sparse: true,
+    default: undefined,
+  },
+  authProvider: {
+    type: String,
+    enum: ['password', 'google'],
+    default: 'password',
+  },
+  lastGoogleLoginAt: {
+    type: Date,
+    default: null,
   },
   phone: {
     type: String,
@@ -146,6 +169,10 @@ const userSchema = new mongoose.Schema({
 userSchema.pre('save', async function (next) {
   try {
     if (!this.isModified('password')) return next();
+    // OTP verification transfers a bcrypt hash that was created when the
+    // registration form was submitted. Marking the document this way prevents
+    // hashing it a second time. This flag is process-local and never persisted.
+    if (this.$locals && this.$locals.passwordAlreadyHashed) return next();
     const salt = await bcrypt.genSalt(10);
     this.password = await bcrypt.hash(this.password, salt);
     next();
@@ -154,11 +181,10 @@ userSchema.pre('save', async function (next) {
   }
 });
 
-// Compare a candidate password against the stored hash.
+// Compare a candidate password against the stored hash. Google-only accounts
+// have no hash, so a password attempt simply fails.
 userSchema.methods.comparePassword = async function (candidate) {
-  if (!this.password) {
-    throw new Error('User password not loaded — query with .select("+password")');
-  }
+  if (!this.password) return false;
   return bcrypt.compare(candidate, this.password);
 };
 
@@ -169,7 +195,10 @@ userSchema.set('toJSON', {
     delete ret.tokenVersion;
     delete ret.resetPasswordToken;
     delete ret.resetPasswordExpires;
+    delete ret.googleId;
     delete ret.__v;
+    // Expose only whether the provider is linked, never the subject identifier.
+    ret.googleLinked = Boolean(doc.googleId);
     return ret;
   },
 });

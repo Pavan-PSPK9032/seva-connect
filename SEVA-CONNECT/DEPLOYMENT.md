@@ -1,7 +1,8 @@
 # Seva Connect — Deployment, Migration & Rollback Guide
 
-This document covers the security and verification upgrade: email OTP registration,
-role-based access control, the admin panel, notifications, reports and auditing.
+This document covers the security and verification upgrade: email OTP
+registration, Google sign-in, role-based access control, the admin panel,
+notifications, reports and auditing.
 
 It is written for the existing deployment topology:
 
@@ -38,25 +39,30 @@ Never commit real values. Only names and purpose are listed here.
 | `OTP_TTL_MINUTES` | No | Default `5`. |
 | `OTP_RESEND_COOLDOWN_SECONDS` | No | Default `60`. |
 | `OTP_MAX_SENDS_PER_HOUR` | No | Default `5` per address. |
+| `GOOGLE_CLIENT_ID` | Recommended | Public OAuth Web client ID. When unset, Google sign-in is disabled with `503 GOOGLE_NOT_CONFIGURED`. No client secret is used. |
 | `GEMINI_API_KEY` | No | Enables the Gemini-backed chatbot. |
 | `GEMINI_MODEL` | No | Optional model override. |
-| `OTP_TEST_CODE` | **Never in production** | Test-only fixed code when `NODE_ENV=test`. |
+| `ALLOW_OTP_TEST_CODE` | **Never in production** | Must be `true`, together with `NODE_ENV=test` and a six-digit `OTP_TEST_CODE`, to enable the pinned code. Production startup refuses to boot if this or `OTP_TEST_CODE` is present. |
+| `OTP_TEST_CODE` | **Never in production** | Test-only fixed code; requires both switches above. |
 
 ### Frontend (Vercel)
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
 | `VITE_API_URL` | Yes | Deployed API base, including `/api`, e.g. `https://seva-connect-api.onrender.com/api`. `/api` only works when a proxy exists. |
+| `VITE_GOOGLE_CLIENT_ID` | Recommended | Same public client ID as the backend. When empty, the Google buttons render disabled with an explanatory note. Inlined at build time, so redeploy after changing it. |
 
 ### Test-only variables (local / CI)
 
 | Variable | Purpose |
 | --- | --- |
-| `NODE_ENV=test` | Enables the pinned-code branch and should disable real delivery in tests. |
-| `OTP_TEST_CODE` | Six-digit code used by the integration suite. |
+| `NODE_ENV=test` | Required for the pinned-code branch; by itself it does **not** enable the bypass. |
+| `ALLOW_OTP_TEST_CODE=true` | Second required switch for the pinned code. |
+| `OTP_TEST_CODE` | Six-digit code used by the integration suite (currently `123456`). |
+| `GOOGLE_CLIENT_ID` | Any syntactically valid value lets the controller's "configured" check pass; the suite stubs the verifier in-process. |
 | `SMTP_HOST` | Optional in tests; the suite sets it only to let resend reach the OTP service. |
 
-The committed `backend/.env.example` describes the same settings without values.
+The committed `backend/.env.example` and `frontend/.env.example` describe the same settings without values.
 
 ### SMTP provider examples
 
@@ -92,6 +98,54 @@ The second command proves end-to-end delivery. If it passes, restart the API
 (it reads SMTP settings at boot) and register at
 `http://localhost:5173/register` with a mailbox you control.
 
+### Configure Google sign-in
+
+The app uses the **Google Identity Services (GIS) ID-token flow**: the browser
+obtains a signed ID token, the API verifies it with `google-auth-library`, and
+the app issues its normal JWT. No client secret and no redirect round-trip are
+used, so there is no secret to store on Render.
+
+1. Open [Google Cloud Console](https://console.cloud.google.com/) and create or
+   select a project.
+2. **APIs & Services → OAuth consent screen**: choose *External*, fill the app
+   name, support email and developer email. Add the `email` and `profile` scopes
+   (the ID token uses them). Publish the consent screen when ready.
+3. **APIs & Services → Credentials → Create credentials → OAuth client ID**:
+   - Application type: **Web application**
+   - Name: e.g. `Seva Connect Web`
+   - **Authorized JavaScript origins** — exact origins, no path, no trailing
+     slash:
+     - `http://localhost:5173`
+     - `https://<your-vercel-app>.vercel.app`
+     - any custom domain, e.g. `https://sevaconnect.org`
+   - **Authorized redirect URIs**: not used by the ID-token/button flow. If you
+     later add a server-side OAuth redirect flow, add the callback then.
+4. Copy the **Client ID** (ends in `.apps.googleusercontent.com`). Set it as
+   `GOOGLE_CLIENT_ID` on Render **and** `VITE_GOOGLE_CLIENT_ID` on Vercel.
+   The client ID is public; never create or deploy a client secret.
+5. Redeploy the frontend (Vite inlines `VITE_*` at build time) and restart the
+   backend.
+
+Security behaviour to expect:
+
+- The backend trusts only fields inside the verified token (signature, issuer,
+  audience, expiry, `email_verified`, `sub`). It never trusts name/email/role
+  sent in the request body.
+- The browser sends a random nonce; it is echoed in the token and checked.
+- Google signup always creates a **volunteer**; it can never grant `admin` or
+  `ngo` rights.
+- If the email already belongs to a password account, sign-in returns
+  `409 GOOGLE_LINK_REQUIRED`. The person must log in with the password once and
+  link Google from **Profile → Google sign-in**. Email matching alone never
+  auto-links accounts.
+- A Google account already linked to another profile returns
+  `409 GOOGLE_ACCOUNT_CONFLICT`.
+- Google-created accounts are stored with `authProvider: 'google'`, a sparse
+  unique `googleId` (`sub`) and no password.
+
+Local check (without a browser): the API returns `503 GOOGLE_NOT_CONFIGURED`
+when `GOOGLE_CLIENT_ID` is unset, which is the expected safe default.
+
 ---
 
 ## 1.1 Hosting settings (Render + Vercel)
@@ -111,8 +165,9 @@ services; nothing here was applied for you.
 
 Environment: every required variable from section 1, including
 `NODE_ENV=production`, `CLIENT_URL=https://<your-vercel-domain>`,
-`SMTP_HOST`/`SMTP_PORT`/`SMTP_SECURE`/`SMTP_USER`/`SMTP_PASS`/`MAIL_FROM`, and a
-distinct `OTP_PEPPER`. Never set `OTP_TEST_CODE`.
+`SMTP_HOST`/`SMTP_PORT`/`SMTP_SECURE`/`SMTP_USER`/`SMTP_PASS`/`MAIL_FROM`,
+`GOOGLE_CLIENT_ID`, and a distinct `OTP_PEPPER`. Never set `OTP_TEST_CODE` or
+`ALLOW_OTP_TEST_CODE` — the API refuses to start in production if either exists.
 
 **Vercel — frontend**
 
@@ -123,8 +178,9 @@ distinct `OTP_PEPPER`. Never set `OTP_TEST_CODE`.
 | Build Command | `npm run build` |
 | Output Directory | `dist` |
 
-Environment: `VITE_API_URL=https://<your-render-service>.onrender.com/api`.
-Vite inlines this at build time, so **redeploy after changing it**.
+Environment: `VITE_API_URL=https://<your-render-service>.onrender.com/api` and
+`VITE_GOOGLE_CLIENT_ID=<same public client ID as the backend>`.
+Vite inlines both at build time, so **redeploy after changing either**.
 
 **MongoDB Atlas**
 
@@ -162,7 +218,7 @@ If you add a custom domain later, add it here **before** switching DNS.
    production SMTP values (locally, or in the Render shell).
 6. **Deploy the backend**, then open `https://<service>.onrender.com/api/health`.
 7. **Create the Vercel project** at `SEVA-CONNECT/frontend`, set
-   `VITE_API_URL`, and deploy.
+   `VITE_API_URL` and `VITE_GOOGLE_CLIENT_ID`, and deploy.
 8. **Update `CLIENT_URL`** to the final Vercel origin if it differs, and restart
    the Render service.
 9. **Smoke test** using section 5, including a real registration with a mailbox
@@ -182,7 +238,7 @@ All changes are additive. No existing collection, document or field is dropped.
 
 | Collection | Model | Notes |
 | --- | --- | --- |
-| `emailverifications` | `EmailVerification` | OTP challenges. Stores only an HMAC-SHA256 digest, never plaintext codes. TTL index removes challenges a day after expiry. |
+| `emailverifications` | `EmailVerification` | OTP challenges. Stores only an HMAC-SHA256 digest, never plaintext codes. For a **new** registration it also carries `pendingRegistration` (name, bcrypt password hash, role, phone, skills, interests, profile image, terms timestamp) so no `User` exists until the code succeeds. TTL index removes challenges a day after expiry. |
 | `announcements` | `Announcement` | Admin notices with `draft`/`published`/`archived` status. |
 | `platformsettings` | `PlatformSetting` | Singleton-style platform configuration. |
 
@@ -190,7 +246,7 @@ All changes are additive. No existing collection, document or field is dropped.
 
 | Collection | Change | Compatibility |
 | --- | --- | --- |
-| `users` | `emailVerified`, `emailVerifiedAt`, `tokenVersion`, `lastLoginAt`, `termsAcceptedAt`, `notificationPrefs`, `accountStatus` | Additive. The schema deliberately has **no default** for `emailVerified`, so legacy documents stay `undefined` and are treated as verified (`emailVerified !== false`). Registration writes `false` explicitly. |
+| `users` | `emailVerified`, `emailVerifiedAt`, `tokenVersion`, `lastLoginAt`, `termsAcceptedAt`, `notificationPrefs`, `accountStatus`, `authProvider`, `googleId`, `lastGoogleLoginAt` | Additive. The schema deliberately has **no default** for `emailVerified`, so legacy documents stay `undefined` and are treated as verified (`emailVerified !== false`). New email registrations write `true` only after OTP success; Google accounts write `true` because Google has already verified the address. `googleId` is a **sparse unique** index, so legacy documents without it do not collide. `password` becomes conditionally required (absent for Google-only accounts). |
 | `ngos` | `status: active \| suspended` | Defaults to `active`. Suspended NGOs are hidden from public listings. |
 | `events` | Status enum extended with `draft` and `archived` | Existing values remain valid. |
 
@@ -206,6 +262,19 @@ npm run migrate:indexes
 
 The script only calls `Model.createIndexes()`; it never drops indexes and never
 modifies documents.
+
+**Google identity index.** `users.googleId` is declared `unique` + `sparse`, so
+the migration creates a unique index that only applies to documents where the
+field exists. Existing accounts have no `googleId` and are unaffected. Verify it
+exists before enabling Google sign-in:
+
+```js
+db.users.getIndexes().find((i) => i.key && i.key.googleId);
+// expect: { unique: true, sparse: true, ... }
+```
+
+No backfill is needed for the new fields. `authProvider` defaults to
+`password`, and Google fields stay absent until an account is linked.
 
 **Optional legacy backfill.** Not required for access: a missing `emailVerified`
 value is already treated as verified at runtime. To make the data explicit (and
@@ -269,13 +338,15 @@ URI if you are unsure.
 
 1. **Take a database backup.**
 2. **Configure backend environment variables** (section 1). Verify `SMTP_HOST`,
-   `MAIL_FROM`, and sender-domain authentication with your provider before
-   announcing the release.
-3. **Run `npm run migrate:indexes`** against the target database.
+   `MAIL_FROM`, `GOOGLE_CLIENT_ID`, and sender-domain authentication with your
+   provider before announcing the release.
+3. **Run `npm run migrate:indexes`** against the target database (this also
+   creates the sparse unique `users.googleId` index).
 4. **Deploy the backend** (`backend/`, Render). Confirm
    `GET /api/health` returns `200`.
-5. **Deploy the frontend** (`frontend/`, Vercel) with `VITE_API_URL` pointing at
-   the backend. The Vercel rewrite already handles SPA routes.
+5. **Deploy the frontend** (`frontend/`, Vercel) with `VITE_API_URL` and
+   `VITE_GOOGLE_CLIENT_ID` pointing at the backend/client. The Vercel rewrite
+   already handles SPA routes.
 6. **Smoke test** (section 5).
 7. **Seed users:** the seed script marks demo accounts verified. Do not re-run
    seeding against production unless you intend to reset demo data.
@@ -314,16 +385,31 @@ Record the actual results in the release ticket.
 2. `GET /api/settings` → `200`, public fields only (no SMTP/JWT values).
 3. `GET /api/announcements` → `200` array.
 4. Register with a **real mailbox you control** → `201`, no token in response,
-   OTP email arrives, code works once, wrong code decrements attempts.
-5. Log in before verifying → `403 EMAIL_NOT_VERIFIED` (only after the correct
-   password).
-6. Verify → token issued, dashboard accessible.
-7. Admin login → `/admin` loads; overview numbers match database counts.
-8. Suspend a test volunteer → their existing session is rejected; reactivate.
-9. Try suspending/demoting your own admin account → blocked; audit entry exists.
-10. Publish an announcement → visible on the home page and in notifications.
-11. Open Reports, change the range, download a CSV.
-12. Check CORS from the production frontend origin and one disallowed origin.
+   no `users` document yet, OTP email arrives, code works once, wrong code
+   decrements attempts.
+5. Confirm a duplicate registration for the same pending address → `409
+   EMAIL_NOT_VERIFIED` with `verificationRequired: true`; after success a
+   repeat → `409 EMAIL_TAKEN`.
+6. Log in before verifying (if an unverified legacy account exists) → `403
+   EMAIL_NOT_VERIFIED` only after the correct password.
+7. Verify → account created, token issued, dashboard accessible.
+8. Resend after the cooldown → new code works, old code is rejected.
+9. **Google signup** with a Google account that has no Seva Connect account →
+   signed in as `volunteer`, no OTP challenge created.
+10. **Google login** again → same user, `isNewUser: false`.
+11. **Google conflict:** a Google account whose email matches a password account
+    → `409 GOOGLE_LINK_REQUIRED`, no token, no automatic link; log in with the
+    password and link from Profile, then Google login works and preserves the
+    original role.
+12. Admin login → `/admin` loads; overview numbers match database counts.
+13. Suspend a test volunteer → their existing session is rejected; reactivate.
+14. Try suspending/demoting your own admin account → blocked; audit entry exists.
+15. Publish an announcement → visible on the home page and in notifications.
+16. Open Reports, change the range, download a CSV.
+17. Check CORS from the production frontend origin and one disallowed origin.
+18. Confirm the Google button renders on the deployed frontend (not the
+    "not configured" fallback) and that the origin appears in Google Cloud
+    Console's authorized JavaScript origins.
 
 ---
 
@@ -336,25 +422,43 @@ These are real results from this repository, not projected outcomes.
 Command: `cd backend && npm test`
 
 ```
-tests 15
-pass 15
+tests 27
+pass 27
 fail 0
-duration_ms 3471
+duration_ms ~4470
 ```
 
 Coverage:
 
-- registration creates an unverified user, returns no token, stores only a
-  64-char OTP hash, and never echoes the code
+- registration stores only a pending `EmailVerification` (bcrypt hash, name,
+  role, terms) and creates **no** `User`; response has no token and no OTP
+- server-side validation of email, password, role and required terms
 - unverified login and forged-token access blocked by middleware
 - a legacy account with **no** `emailVerified` value (simulated with `$unset`)
   hydrates as `undefined` and can still log in
-- wrong OTP decrements attempts; correct OTP verifies once; replay rejected
+- wrong OTP decrements attempts; correct OTP creates exactly one account;
+  replay is rejected
+- wrong code ×5 locks and burns the challenge; even the right code is refused
+- expired challenge returns `400 OTP_EXPIRED`, is consumed, creates no user
 - resend cooldown `429 OTP_COOLDOWN`; unknown address gets a generic response
-- five wrong attempts lock and burn the challenge; the account stays unverified
-- expired challenge returns `400 OTP_EXPIRED` and is consumed
+- resend invalidates the previous challenge and preserves pending details;
+  hourly send cap returns `429 OTP_RATE_LIMITED`
+- concurrent registrations leave no account and one usable challenge; two
+  concurrent verifications produce exactly one account/login
 - SMTP-unavailable registration returns `503 EMAIL_DELIVERY_FAILED` and leaves
-  no user or challenge behind
+  no user **or** challenge behind
+- the test-code bypass is off unless `NODE_ENV=test` **and**
+  `ALLOW_OTP_TEST_CODE=true`; it is always off in production
+- Google signup creates a verified `volunteer`, no OTP, and exposes no
+  `googleId`; repeat Google login reuses the same account; password login on a
+  Google-only account fails with `INVALID_CREDENTIALS`
+- Google invalid / expired / unverified-email credentials are rejected;
+  malformed credentials fail validation
+- Google never auto-links an existing password account (`GOOGLE_LINK_REQUIRED`)
+- authenticated Google linking works, preserves the existing role, and rejects
+  an email mismatch or anonymous caller
+- concurrent Google signups create one account
+- logout invalidates the current token
 - admin overview rejects anonymous (`401`) and volunteer (`403`) callers
 - every admin read endpoint (overview, users, volunteers, NGOs, events,
   applications, announcements, audit, reports, settings, security, CSV export)
@@ -367,7 +471,8 @@ Coverage:
 - public settings and announcements are readable and leak no secrets
 
 The suite uses `mongodb-memory-server`; it never touches the configured Atlas
-database.
+database. Google's verifier is replaced in-process for those tests; there is no
+production bypass in the application code.
 
 ### Frontend
 
@@ -377,7 +482,7 @@ npx tsc -b --pretty false   # passed, no output
 npm run build               # passed
 ```
 
-Vite build: 2,688 modules transformed, built in 5.15 s (latest run).
+Vite build: 2,689 modules transformed, built in 5.40 s (latest run).
 
 ### Manual smoke test (real dev API)
 
@@ -423,6 +528,10 @@ smoke test. The temporary API process was stopped afterwards.
 - Real SMTP delivery — no SMTP credentials exist in `backend/.env`. Until they
   are configured, registration correctly fails with `503` and no account is
   created. Configure `SMTP_*`/`MAIL_FROM` to enable it.
+- Real Google sign-in — no OAuth client ID or Google Cloud Console access exists
+  in this workspace. The integration tests stub Google's verifier; the real
+  signature/audience/issuer path has **not** been exercised against Google.
+  Configure `GOOGLE_CLIENT_ID`/`VITE_GOOGLE_CLIENT_ID` and follow section 5.
 - Production deployment to Render/Vercel — no deployment credentials were
   available, so nothing was deployed.
 - Browser end-to-end flows against a deployed environment beyond the production
@@ -430,18 +539,26 @@ smoke test. The temporary API process was stopped afterwards.
 
 ### Local development with OTP
 
-Without SMTP credentials, registration cannot complete locally. Two supported
+Without SMTP credentials, registration cannot complete locally. Three supported
 options:
 
 1. Configure `SMTP_*` in `backend/.env`, run `npm run mail:test -- you@example.com`
    to confirm delivery, then use a real mailbox.
-2. Run the automated test suite (`npm test`), which pins `OTP_TEST_CODE` under
-   `NODE_ENV=test`. Never set `NODE_ENV=test` or `OTP_TEST_CODE` in production.
+2. Use a local capture server (for example
+   [MailHog](https://github.com/mailhog/MailHog) or
+   [Mailpit](https://github.com/axllent/mailpit)): set `SMTP_HOST=127.0.0.1`,
+   `SMTP_PORT=1025`, leave `SMTP_USER`/`SMTP_PASS` empty, and read the code from
+   its web UI. No credentials leave your machine.
+3. Run the automated test suite (`npm test`). The pinned code requires
+   `NODE_ENV=test`, `ALLOW_OTP_TEST_CODE=true` and a six-digit `OTP_TEST_CODE`.
+   Never set any of these in production; the server refuses to start there if
+   the test variables exist.
 
 On 2026-10-27 `npm run mail:test` was executed in this workspace with SMTP
 unconfigured and correctly refused to send, printing the missing variables and
 exiting non-zero. It has **not** been run against a real provider because no
-SMTP credentials exist here yet.
+SMTP credentials exist here yet. Likewise, no Google OAuth client has been
+created or tested against Google.
 
 ---
 
@@ -455,6 +572,18 @@ SMTP credentials exist here yet.
 - **OTP lockout:** after five wrong attempts the challenge is burned. The next
   attempt returns a generic invalid-code error until the resend cooldown passes
   and a fresh code is requested.
+- **No account before verification:** a pending registration lives only in
+  `emailverifications`; the `users` document is inserted atomically after a
+  successful code. If SMTP fails, the challenge is removed and no account
+  exists, so the address remains reusable. The unique email index resolves
+  concurrent verification races.
+- **Google linking:** a Google identity is never attached to a password account
+  by matching email alone. Sign in with the password once, then link from
+  Profile. Google signup always creates a `volunteer`. `googleId` is never
+  serialized to the browser; only `googleLinked` is exposed.
+- **Google tokens:** signature, issuer, audience, expiry, `email_verified` and
+  the browser nonce are checked server-side. The client secret, if one exists
+  in Console, is neither needed nor stored by this application.
 - **Notifications:** in-app notifications are always persisted unless the user
   has disabled in-app delivery; email copies are best-effort and require SMTP
   plus the user's email preference.

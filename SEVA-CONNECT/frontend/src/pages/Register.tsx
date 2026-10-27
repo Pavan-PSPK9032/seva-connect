@@ -3,14 +3,16 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { HeartHandshake, Loader2, MailCheck, UserPlus } from 'lucide-react';
+import { Eye, EyeOff, HeartHandshake, Loader2, MailCheck, ShieldAlert, UserPlus } from 'lucide-react';
 import { useAuth, apiErrorMessage } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
+import GoogleSignInButton from '../components/GoogleSignInButton';
+import type { Role } from '../types';
 
 const registerSchema = z
   .object({
     name: z.string().trim().min(2, 'Enter at least 2 characters').max(60, 'Keep it under 60 characters'),
-    email: z.string().email('Enter a valid email address'),
+    email: z.string().trim().email('Enter a valid email address'),
     phone: z.string().regex(/^\+?[\d\s\-()]{7,20}$/, 'Enter a valid phone number (optional)').optional().or(z.literal('')),
     role: z.enum(['volunteer', 'ngo'], { message: 'Choose an account type' }),
     password: z.string().min(6, 'Password must be at least 6 characters').max(128, 'Keep it under 128 characters'),
@@ -27,25 +29,38 @@ const registerSchema = z
 
 type RegisterForm = z.infer<typeof registerSchema>;
 
+function homeForRole(role: Role): string {
+  if (role === 'admin') return '/admin';
+  if (role === 'ngo') return '/my-ngo';
+  return '/dashboard';
+}
+
 export default function Register() {
-  const { register: registerAccount } = useAuth();
+  const { register: registerAccount, loginWithGoogle } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
   const [serverError, setServerError] = useState<string | null>(null);
   const [conflict, setConflict] = useState(false);
+  const [smtpUnavailable, setSmtpUnavailable] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
 
   const {
     register,
     handleSubmit,
+    watch,
     formState: { errors, isSubmitting },
   } = useForm<RegisterForm>({
     resolver: zodResolver(registerSchema),
     defaultValues: { role: 'volunteer', acceptTerms: false as unknown as true },
   });
 
+  const termsAccepted = watch('acceptTerms');
+
   const onSubmit = async (values: RegisterForm) => {
     setServerError(null);
     setConflict(false);
+    setSmtpUnavailable(false);
     const skills = values.skills
       ? values.skills.split(',').map((s) => s.trim()).filter(Boolean)
       : undefined;
@@ -64,6 +79,7 @@ export default function Register() {
         replace: true,
         state: {
           email: result.email,
+          expiresInSeconds: result.expiresInSeconds ?? 5 * 60,
           resendAfterSeconds: result.resendAfterSeconds ?? 60,
           justRegistered: true,
         },
@@ -81,9 +97,42 @@ export default function Register() {
         return;
       }
 
+      // Form values stay in react-hook-form, so a retry does not require
+      // retyping anything after a mail outage.
+      if (code === 'EMAIL_DELIVERY_FAILED' || code === 'EMAIL_NOT_CONFIGURED') {
+        setSmtpUnavailable(true);
+      }
+
       setConflict(status === 409);
       setServerError(message);
       toast('error', 'Registration failed', message);
+    }
+  };
+
+  const handleGoogle = async (credential: string, nonce: string) => {
+    setServerError(null);
+    setConflict(false);
+    setSmtpUnavailable(false);
+    try {
+      const result = await loginWithGoogle(credential, nonce, true);
+      toast(
+        'success',
+        result.isNewUser ? 'Account created' : 'Welcome back',
+        result.isNewUser
+          ? `You are signed in as ${result.user.email}.`
+          : `Signed in as ${result.user.email}.`
+      );
+      navigate(homeForRole(result.user.role), { replace: true });
+    } catch (err) {
+      const code = (err as { response?: { data?: { code?: string } } })?.response?.data?.code;
+      const message = apiErrorMessage(err, 'Google sign-in failed. Please try again.');
+      if (code === 'GOOGLE_LINK_REQUIRED') {
+        setConflict(true);
+        toast('info', 'Use your password once', message);
+      } else {
+        toast('error', 'Google sign-in failed', message);
+      }
+      setServerError(message);
     }
   };
 
@@ -100,12 +149,25 @@ export default function Register() {
 
         <div className="mt-5 flex items-start gap-2 rounded-xl bg-primary-50 px-3 py-2 text-xs text-primary-800 dark:bg-primary-500/10 dark:text-primary-200">
           <MailCheck className="mt-0.5 h-4 w-4 shrink-0" />
-          <p>We&apos;ll email a six-digit code to confirm your address before your account is activated.</p>
+          <p>
+            We&apos;ll email a six-digit code to confirm your address. Your account is created only
+            after the code is verified.
+          </p>
         </div>
 
         {serverError && (
-          <div className="mt-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300">
+          <div
+            role="alert"
+            className="mt-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300"
+          >
             <p>{serverError}</p>
+            {smtpUnavailable && (
+              <p className="mt-2 flex items-start gap-2 text-xs">
+                <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                Email delivery is temporarily unavailable. Your details are still filled in —
+                wait a few minutes and select <strong>Create account</strong> again.
+              </p>
+            )}
             {conflict && (
               <p className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs font-semibold">
                 <Link to="/login" className="underline underline-offset-2">
@@ -162,12 +224,48 @@ export default function Register() {
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <label htmlFor="password" className="label">Password</label>
-              <input id="password" type="password" autoComplete="new-password" className="input" placeholder="Min 6 characters" {...register('password')} />
+              <div className="relative">
+                <input
+                  id="password"
+                  type={showPassword ? 'text' : 'password'}
+                  autoComplete="new-password"
+                  className="input pr-11"
+                  placeholder="Min 6 characters"
+                  {...register('password')}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((value) => !value)}
+                  className="absolute inset-y-0 right-0 flex w-11 items-center justify-center rounded-r-xl text-slate-500 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:text-slate-400 dark:hover:text-slate-200"
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  aria-pressed={showPassword}
+                >
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
               {errors.password && <p className="mt-1 text-xs text-red-600">{errors.password.message}</p>}
             </div>
             <div>
               <label htmlFor="confirm" className="label">Confirm password</label>
-              <input id="confirm" type="password" autoComplete="new-password" className="input" placeholder="Repeat password" {...register('confirm')} />
+              <div className="relative">
+                <input
+                  id="confirm"
+                  type={showConfirm ? 'text' : 'password'}
+                  autoComplete="new-password"
+                  className="input pr-11"
+                  placeholder="Repeat password"
+                  {...register('confirm')}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowConfirm((value) => !value)}
+                  className="absolute inset-y-0 right-0 flex w-11 items-center justify-center rounded-r-xl text-slate-500 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:text-slate-400 dark:hover:text-slate-200"
+                  aria-label={showConfirm ? 'Hide password confirmation' : 'Show password confirmation'}
+                  aria-pressed={showConfirm}
+                >
+                  {showConfirm ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
               {errors.confirm && <p className="mt-1 text-xs text-red-600">{errors.confirm.message}</p>}
             </div>
           </div>
@@ -195,6 +293,18 @@ export default function Register() {
             {isSubmitting ? 'Sending verification code…' : 'Create account'}
           </button>
         </form>
+
+        <div className="my-6 flex items-center gap-3" aria-hidden="true">
+          <span className="h-px flex-1 bg-navy-700/10 dark:bg-white/10" />
+          <span className="text-xs font-medium uppercase tracking-wide text-slate-400">or</span>
+          <span className="h-px flex-1 bg-navy-700/10 dark:bg-white/10" />
+        </div>
+
+        <GoogleSignInButton
+          onCredential={handleGoogle}
+          disabled={!termsAccepted || isSubmitting}
+          text="signup_with"
+        />
 
         <p className="mt-6 text-center text-sm text-slate-500">
           Already have an account?{' '}

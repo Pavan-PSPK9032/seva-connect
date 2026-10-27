@@ -2,11 +2,12 @@ import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { Clock, Heart, Loader2, MapPin, Save, ShieldCheck, UserCircle2 } from 'lucide-react';
+import { Clock, Heart, Link2, Loader2, MapPin, Save, ShieldCheck, UserCircle2 } from 'lucide-react';
 import { useAuth, apiErrorMessage } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { apiPatch } from '../services/api';
 import Spinner from '../components/Spinner';
+import GoogleSignInButton from '../components/GoogleSignInButton';
 
 const profileSchema = z.object({
   name: z.string().trim().min(2, 'Name must be at least 2 characters').max(80, 'Name is too long'),
@@ -30,10 +31,11 @@ function splitList(value: string): string[] {
 }
 
 export default function Profile() {
-  const { user, refreshUser } = useAuth();
+  const { user, refreshUser, linkGoogle } = useAuth();
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
+  const [googleError, setGoogleError] = useState<string | null>(null);
 
   const {
     register,
@@ -102,6 +104,18 @@ export default function Profile() {
       toast('error', 'Update failed', message);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleLinkGoogle = async (credential: string, nonce: string) => {
+    setGoogleError(null);
+    try {
+      await linkGoogle(credential, nonce);
+      toast('success', 'Google linked', 'You can now sign in with Continue with Google.');
+    } catch (err) {
+      const message = apiErrorMessage(err, 'Could not link Google. Please try again.');
+      setGoogleError(message);
+      toast('error', 'Google link failed', message);
     }
   };
 
@@ -234,6 +248,42 @@ export default function Profile() {
           </button>
         </div>
       </form>
+
+      <section className="card mt-6 p-7" aria-labelledby="google-link-heading">
+        <h2
+          id="google-link-heading"
+          className="flex items-center gap-2 font-display text-lg font-bold text-navy-800 dark:text-white"
+        >
+          <Link2 className="h-4 w-4" /> Google sign-in
+        </h2>
+        {user.googleLinked ? (
+          <p className="mt-2 flex items-start gap-2 text-sm text-slate-600 dark:text-slate-300">
+            <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-primary-600 dark:text-primary-400" />
+            Google is linked to this account. You can sign in with either your password or{' '}
+            <strong>Continue with Google</strong>.
+          </p>
+        ) : (
+          <>
+            <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+              Link Google to sign in faster. The Google account email must match{' '}
+              <span className="font-semibold">{user.email}</span>; for security, linking is only
+              available while you are signed in with your password.
+            </p>
+            <div className="mt-4 max-w-sm">
+              <GoogleSignInButton
+                onCredential={handleLinkGoogle}
+                onError={setGoogleError}
+                text="continue_with"
+              />
+            </div>
+            {googleError && (
+              <p role="alert" className="mt-3 text-sm text-red-600 dark:text-red-400">
+                {googleError}
+              </p>
+            )}
+          </>
+        )}
+      </section>
     </div>
   );
 }

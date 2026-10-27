@@ -23,9 +23,17 @@ interface AuthContextValue {
   token: string | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<User>;
+  loginWithGoogle: (
+    credential: string,
+    nonce: string,
+    acceptTerms?: boolean
+  ) => Promise<{ user: User; isNewUser: boolean }>;
+  linkGoogle: (credential: string, nonce: string) => Promise<User>;
   register: (input: RegisterInput) => Promise<RegisterResult>;
   verifyEmail: (email: string, otp: string) => Promise<User>;
-  resendVerification: (email: string) => Promise<{ message?: string; retryAfter?: number }>;
+  resendVerification: (
+    email: string
+  ) => Promise<{ message?: string; retryAfter?: number; expiresInSeconds?: number }>;
   refreshUser: () => Promise<User>;
   changePassword: (currentPassword: string, newPassword: string) => Promise<User>;
   logout: () => Promise<void>;
@@ -48,6 +56,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const res = await apiPost<AuthResult>('/auth/login', { email, password });
     if (!res.success || !res.token || !res.user) throw new Error(res.message || 'Login failed');
     persist({ token: res.token, user: res.user });
+    return res.user;
+  };
+
+  /**
+   * Google Identity Services returns a signed ID token in the browser. The API
+   * verifies it and returns the normal application JWT, so Google users get the
+   * same session, roles and protected routes as password users.
+   */
+  const loginWithGoogle = async (
+    credential: string,
+    nonce: string,
+    acceptTerms?: boolean
+  ): Promise<{ user: User; isNewUser: boolean }> => {
+    const res = await apiPost<AuthResult>('/auth/google', { credential, nonce, acceptTerms });
+    if (!res.success || !res.token || !res.user) {
+      throw new Error(res.message || 'Google sign-in failed.');
+    }
+    persist({ token: res.token, user: res.user });
+    return { user: res.user, isNewUser: Boolean(res.isNewUser) };
+  };
+
+  /** Link Google to the signed-in account (requires a password session). */
+  const linkGoogle = async (credential: string, nonce: string): Promise<User> => {
+    const res = await apiPost<AuthResult>('/auth/google/link', { credential, nonce });
+    if (!res.success || !res.user) throw new Error(res.message || 'Could not link Google.');
+    storeAuth(getStoredToken() ?? '', res.user);
+    setUser(res.user);
     return res.user;
   };
 
@@ -78,10 +113,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const resendVerification = async (
     email: string
-  ): Promise<{ message?: string; retryAfter?: number }> => {
+  ): Promise<{ message?: string; retryAfter?: number; expiresInSeconds?: number }> => {
     const res = await apiPost<VerificationChallenge>('/auth/resend-verification', { email });
     if (!res.success) throw new Error(res.message || 'Could not resend the code');
-    return { message: res.message, retryAfter: res.retryAfter };
+    return {
+      message: res.message,
+      retryAfter: res.retryAfter,
+      expiresInSeconds: res.expiresInSeconds,
+    };
   };
 
   /**
@@ -134,6 +173,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         token,
         loading,
         login,
+        loginWithGoogle,
+        linkGoogle,
         register,
         verifyEmail,
         resendVerification,
