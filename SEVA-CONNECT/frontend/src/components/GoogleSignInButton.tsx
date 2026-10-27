@@ -14,6 +14,15 @@ interface GoogleSignInButtonProps {
 
 const GIS_SCRIPT_ID = 'seva-google-gsi';
 let gisPromise: Promise<void> | null = null;
+/** GIS keeps one global instance per page, so initialize it once. */
+let initializedClientId = '';
+let pageNonce = '';
+let credentialSink: ((response: { credential?: string }) => void) | null = null;
+
+function getPageNonce(): string {
+  if (!pageNonce) pageNonce = makeNonce();
+  return pageNonce;
+}
 
 function loadGis(): Promise<void> {
   if (typeof window === 'undefined') return Promise.reject(new Error('Google sign-in needs a browser.'));
@@ -104,7 +113,7 @@ export default function GoogleSignInButton({
   const resolvedClientId =
     clientId || (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined) || '';
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const nonceRef = useRef<string>(makeNonce());
+  const [nonce] = useState<string>(getPageNonce);
   const credentialHandlerRef = useRef(onCredential);
   const errorHandlerRef = useRef(onError);
 
@@ -132,7 +141,7 @@ export default function GoogleSignInButton({
       setBusy(true);
       setError(null);
       try {
-        await credentialHandlerRef.current(response.credential, nonceRef.current);
+        await credentialHandlerRef.current(response.credential, nonce);
       } catch (err) {
         const message =
           err instanceof Error && err.message
@@ -145,18 +154,26 @@ export default function GoogleSignInButton({
       }
     };
 
+    const sink = (response: { credential?: string }) => {
+      void handleCredential(response);
+    };
+    credentialSink = sink;
+
     const setup = async () => {
       try {
         await loadGis();
         if (cancelled || !containerRef.current) return;
 
         containerRef.current.innerHTML = '';
-        window.google!.accounts.id.initialize({
-          client_id: resolvedClientId,
-          nonce: nonceRef.current,
-          ux_mode: 'popup',
-          callback: handleCredential,
-        });
+        if (initializedClientId !== resolvedClientId) {
+          window.google!.accounts.id.initialize({
+            client_id: resolvedClientId,
+            nonce,
+            ux_mode: 'popup',
+            callback: (response) => credentialSink?.(response),
+          });
+          initializedClientId = resolvedClientId;
+        }
         window.google!.accounts.id.renderButton(containerRef.current, {
           type: 'standard',
           theme: 'outline',
@@ -179,8 +196,9 @@ export default function GoogleSignInButton({
 
     return () => {
       cancelled = true;
+      if (credentialSink === sink) credentialSink = null;
     };
-  }, [resolvedClientId, disabled, text]);
+  }, [resolvedClientId, disabled, nonce, text]);
 
   if (!resolvedClientId) {
     return (
