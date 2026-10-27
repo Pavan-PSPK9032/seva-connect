@@ -36,6 +36,15 @@ export default function Login() {
       navigate(from || '/', { replace: true });
     } catch (err) {
       const message = apiErrorMessage(err, 'Login failed. Please try again.');
+      const code = (err as { response?: { data?: { code?: string; email?: string } } })?.response?.data?.code;
+      const email = (err as { response?: { data?: { email?: string } } })?.response?.data?.email;
+
+      if (code === 'EMAIL_NOT_VERIFIED') {
+        toast('info', 'Email not verified', message);
+        navigate('/verify-email', { state: { email: email || values.email } });
+        return;
+      }
+
       setServerError(message);
       toast('error', 'Login failed', message);
     }

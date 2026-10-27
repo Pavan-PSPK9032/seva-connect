@@ -28,7 +28,7 @@ const eventBody = ({ update = false } = {}) => {
       .withMessage('Application deadline must be a date (YYYY-MM-DD)')
       .toDate(),
     body('requiredVolunteers').optional({ values: 'falsy' }).isInt({ min: 1 }).toInt(),
-    body('status').optional().isIn(['upcoming', 'ongoing', 'completed', 'cancelled']).withMessage('Invalid status'),
+    body('status').optional().isIn(['draft', 'upcoming', 'ongoing', 'completed', 'cancelled', 'archived']).withMessage('Invalid status'),
   ];
   if (update) {
     return rules.map((r) => r.optional());

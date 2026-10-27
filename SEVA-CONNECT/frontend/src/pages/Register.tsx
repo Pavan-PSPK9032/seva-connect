@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { HeartHandshake, Loader2, UserPlus } from 'lucide-react';
+import { HeartHandshake, Loader2, MailCheck, UserPlus } from 'lucide-react';
 import { useAuth, apiErrorMessage } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 
@@ -16,6 +16,9 @@ const registerSchema = z
     password: z.string().min(6, 'Password must be at least 6 characters').max(128, 'Keep it under 128 characters'),
     confirm: z.string(),
     skills: z.string().optional(),
+    acceptTerms: z.literal(true, {
+      message: 'Please accept the terms and privacy policy to continue',
+    }),
   })
   .refine((data) => data.password === data.confirm, {
     message: 'Passwords do not match',
@@ -37,7 +40,7 @@ export default function Register() {
     formState: { errors, isSubmitting },
   } = useForm<RegisterForm>({
     resolver: zodResolver(registerSchema),
-    defaultValues: { role: 'volunteer' },
+    defaultValues: { role: 'volunteer', acceptTerms: false as unknown as true },
   });
 
   const onSubmit = async (values: RegisterForm) => {
@@ -47,19 +50,37 @@ export default function Register() {
       ? values.skills.split(',').map((s) => s.trim()).filter(Boolean)
       : undefined;
     try {
-      const user = await registerAccount({
+      const result = await registerAccount({
         name: values.name,
         email: values.email,
         password: values.password,
         phone: values.phone || undefined,
         role: values.role,
         skills,
+        acceptTerms: values.acceptTerms,
       });
-      toast('success', 'Account created!', `Welcome to Seva Connect, ${user.name.split(' ')[0]}.`);
-      navigate('/');
+      toast('success', 'Check your email', `We sent a six-digit code to ${result.email}.`);
+      navigate('/verify-email', {
+        replace: true,
+        state: {
+          email: result.email,
+          resendAfterSeconds: result.resendAfterSeconds ?? 60,
+          justRegistered: true,
+        },
+      });
     } catch (err) {
       const message = apiErrorMessage(err, 'Registration failed. Please try again.');
       const status = (err as { response?: { status?: number } })?.response?.status;
+      const code = (err as { response?: { data?: { code?: string } } })?.response?.data?.code;
+
+      // An existing but unverified account continues on the verification screen
+      // instead of being told to log in.
+      if (code === 'EMAIL_NOT_VERIFIED') {
+        toast('info', 'Verify your email', message);
+        navigate('/verify-email', { replace: true, state: { email: values.email } });
+        return;
+      }
+
       setConflict(status === 409);
       setServerError(message);
       toast('error', 'Registration failed', message);
@@ -75,6 +96,11 @@ export default function Register() {
           </span>
           <h1 className="mt-4 font-display text-2xl font-bold text-navy-800 dark:text-white">Create your account</h1>
           <p className="mt-1 text-sm text-slate-500">Volunteers and NGOs both start here.</p>
+        </div>
+
+        <div className="mt-5 flex items-start gap-2 rounded-xl bg-primary-50 px-3 py-2 text-xs text-primary-800 dark:bg-primary-500/10 dark:text-primary-200">
+          <MailCheck className="mt-0.5 h-4 w-4 shrink-0" />
+          <p>We&apos;ll email a six-digit code to confirm your address before your account is activated.</p>
         </div>
 
         {serverError && (
@@ -146,9 +172,27 @@ export default function Register() {
             </div>
           </div>
 
+          <div>
+            <label className="flex items-start gap-2 text-sm text-slate-600 dark:text-slate-300">
+              <input type="checkbox" className="mt-0.5 h-4 w-4 rounded accent-primary-600" {...register('acceptTerms')} />
+              <span>
+                I agree to the{' '}
+                <Link to="/terms" className="font-semibold text-primary-600 hover:underline" target="_blank">
+                  terms of use
+                </Link>{' '}
+                and{' '}
+                <Link to="/privacy" className="font-semibold text-primary-600 hover:underline" target="_blank">
+                  privacy policy
+                </Link>
+                .
+              </span>
+            </label>
+            {errors.acceptTerms && <p className="mt-1 text-xs text-red-600">{errors.acceptTerms.message}</p>}
+          </div>
+
           <button type="submit" disabled={isSubmitting} className="btn-primary w-full">
             {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
-            {isSubmitting ? 'Creating account…' : 'Create account'}
+            {isSubmitting ? 'Sending verification code…' : 'Create account'}
           </button>
         </form>
 

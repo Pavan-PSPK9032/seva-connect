@@ -14,6 +14,12 @@ export default function ProtectedRoute({ roles }: ProtectedRouteProps) {
     return <Navigate to="/login" replace state={{ from: location.pathname }} />;
   }
 
+  // Accounts created before email verification existed have no flag and are
+  // treated as verified; only an explicit false is blocked.
+  if (user.emailVerified === false) {
+    return <Navigate to="/verify-email" replace state={{ email: user.email, from: location.pathname }} />;
+  }
+
   if (roles && roles.length > 0 && !roles.includes(user.role)) {
     return <Navigate to="/" replace />;
   }

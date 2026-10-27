@@ -14,7 +14,6 @@ type Form = z.infer<typeof schema>;
 
 export default function ForgotPassword() {
   const [sent, setSent] = useState(false);
-  const [devLink, setDevLink] = useState<string | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
 
   const {
@@ -26,9 +25,8 @@ export default function ForgotPassword() {
   const onSubmit = async (values: Form) => {
     setServerError(null);
     try {
-      const res = await apiPost<never>('/auth/forgot-password', values);
+      await apiPost('/auth/forgot-password', values);
       setSent(true);
-      setDevLink(res.devResetUrl || null);
     } catch (err) {
       setServerError(apiErrorMessage(err, 'Could not send the reset link. Please try again.'));
     }
@@ -59,15 +57,6 @@ export default function ForgotPassword() {
               <MailCheck className="mt-0.5 h-5 w-5 shrink-0" />
               <p>If an account exists for that address, a reset link is on its way. It expires in 30 minutes.</p>
             </div>
-            {devLink && (
-              <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
-                <p className="font-semibold">Development mode</p>
-                <p className="mt-1 break-all">No mail provider is configured, so use this link:</p>
-                <Link to={devLink.replace(/^https?:\/\/[^/]+/, '')} className="mt-1 inline-block font-semibold underline">
-                  Open reset link
-                </Link>
-              </div>
-            )}
             <Link to="/login" className="btn-outline w-full">
               <ArrowLeft className="h-4 w-4" /> Back to log in
             </Link>

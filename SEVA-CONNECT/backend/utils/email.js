@@ -11,4 +11,15 @@ function normalizeEmail(value) {
   return value.trim().toLowerCase();
 }
 
-module.exports = { normalizeEmail };
+/**
+ * Whether an account may use protected features.
+ *
+ * Accounts created before email verification existed have no `emailVerified`
+ * value at all. They are treated as verified so the upgrade never locks out
+ * existing users; only an explicit `false` blocks access.
+ */
+function isEmailVerified(user) {
+  return Boolean(user) && user.emailVerified !== false;
+}
+
+module.exports = { normalizeEmail, isEmailVerified };

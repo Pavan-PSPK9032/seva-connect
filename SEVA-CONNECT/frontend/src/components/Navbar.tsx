@@ -5,6 +5,7 @@ import {
   HeartHandshake,
   LayoutDashboard,
   LogOut,
+  MailWarning,
   Menu,
   ShieldCheck,
   Sparkles,
@@ -139,6 +140,16 @@ export default function Navbar() {
                   <div className="border-b border-navy-700/10 px-4 py-3 dark:border-white/10">
                     <p className="truncate text-sm font-semibold text-navy-800 dark:text-white">{user.name}</p>
                     <p className="truncate text-xs capitalize text-slate-500">{user.role}</p>
+                    {user.emailVerified === false && (
+                      <Link
+                        to="/verify-email"
+                        state={{ email: user.email }}
+                        onClick={() => setProfileOpen(false)}
+                        className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800 hover:bg-amber-200 dark:bg-amber-500/15 dark:text-amber-300"
+                      >
+                        <MailWarning className="h-3 w-3" /> Verify your email
+                      </Link>
+                    )}
                   </div>
                   <Link
                     to="/profile"
@@ -183,7 +194,7 @@ export default function Navbar() {
                   )}
                   <button
                     type="button"
-                    onClick={logout}
+                    onClick={() => void logout()}
                     className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm font-medium text-red-600 hover:bg-red-50 dark:hover:bg-red-500/10"
                   >
                     <LogOut className="h-4 w-4" /> Sign out
@@ -254,6 +265,16 @@ export default function Navbar() {
             ))}
             {user && (
               <div className="mt-1 flex flex-col gap-1 border-t border-navy-700/10 pt-2 dark:border-white/10">
+                {user.emailVerified === false && (
+                  <NavLink
+                    to="/verify-email"
+                    state={{ email: user.email }}
+                    onClick={() => setOpen(false)}
+                    className="flex items-center gap-1.5 rounded-lg bg-amber-100 px-3 py-2.5 text-sm font-semibold text-amber-800 dark:bg-amber-500/15 dark:text-amber-300"
+                  >
+                    <MailWarning className="h-4 w-4" /> Verify your email
+                  </NavLink>
+                )}
                 {user.role === 'volunteer' && (
                   <NavLink to="/dashboard" onClick={() => setOpen(false)} className="flex items-center gap-1.5 rounded-lg px-3 py-2.5 text-sm font-medium text-navy-600 hover:bg-navy-700/5 dark:text-slate-300 dark:hover:bg-white/10">
                     <LayoutDashboard className="h-4 w-4" /> Dashboard
@@ -276,7 +297,7 @@ export default function Navbar() {
             )}
             <div className="mt-2 flex gap-2 border-t border-navy-700/10 pt-3 dark:border-white/10">
               {user ? (
-                <button type="button" onClick={() => { logout(); setOpen(false); }} className="btn-outline w-full">
+                <button type="button" onClick={() => { void logout(); setOpen(false); }} className="btn-outline w-full">
                   <LogOut className="h-4 w-4" /> Sign out
                 </button>
               ) : (

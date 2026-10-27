@@ -12,7 +12,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 
-const { getAllowedOrigins } = require('./config/cors');
+const { isAllowedOrigin } = require('./config/cors');
 
 const app = express();
 
@@ -22,12 +22,11 @@ app.use(helmet());
 
 app.use('/favicon.ico', express.static(path.join(__dirname, 'public', 'favicon.ico')));
 
-const allowedOrigins = getAllowedOrigins();
 app.use(
   cors({
-    origin: allowedOrigins.length
-      ? allowedOrigins
-      : (origin, cb) => cb(null, origin || true),
+    // Only configured origins are reflected. A disallowed origin simply gets no
+    // CORS headers, which the browser turns into a blocked response.
+    origin: (origin, cb) => cb(null, isAllowedOrigin(origin)),
     credentials: true,
     optionsSuccessStatus: 204,
   })
@@ -58,6 +57,8 @@ app.use('/api/certificates', require('./routes/certificateRoutes'));
 app.use('/api/notifications', require('./routes/notificationRoutes'));
 app.use('/api/stats', require('./routes/statsRoutes'));
 app.use('/api/admin', require('./routes/adminRoutes'));
+app.use('/api/announcements', require('./routes/announcementRoutes'));
+app.use('/api/settings', require('./routes/settingsRoutes'));
 app.use('/api/chatbot', require('./routes/chatbotRoutes'));
 
 app.get('/api/health', (req, res) => {

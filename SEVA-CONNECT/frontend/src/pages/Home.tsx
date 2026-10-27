@@ -7,13 +7,16 @@ import {
   BadgeCheck,
   CalendarDays,
   HeartHandshake,
+  Info,
   MapPin,
+  Megaphone,
   Search,
   Sparkles,
   Users,
+  X,
 } from 'lucide-react';
 import { apiGet, apiGetOne } from '../services/api';
-import type { EventItem, NGO, PlatformStats } from '../types';
+import type { Announcement, EventItem, NGO, PlatformSettings, PlatformStats } from '../types';
 import NGOCard from '../components/NGOCard';
 import EventCard from '../components/EventCard';
 import { GridSkeleton } from '../components/Skeleton';
@@ -46,6 +49,9 @@ export default function Home() {
   const [ngos, setNgos] = useState<NGO[]>([]);
   const [events, setEvents] = useState<EventItem[]>([]);
   const [platform, setPlatform] = useState<PlatformStats | null>(null);
+  const [settings, setSettings] = useState<PlatformSettings | null>(null);
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [bannerDismissed, setBannerDismissed] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -74,6 +80,30 @@ export default function Home() {
     };
   }, []);
 
+  // Platform notices are non-critical: a failure here must never block the page.
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const [settingsRes, announcementRes] = await Promise.all([
+          apiGetOne<PlatformSettings>('/settings'),
+          apiGet<Announcement>('/announcements'),
+        ]);
+        if (!active) return;
+        setSettings(settingsRes.data ?? null);
+        setAnnouncements(announcementRes.data ?? []);
+      } catch {
+        /* the banner and notices simply stay hidden */
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const bannerText = settings?.announcementBanner?.trim() || '';
+  const maintenanceText = settings?.maintenanceNotice?.trim() || '';
+
   const submitSearch = (e: FormEvent) => {
     e.preventDefault();
     navigate(`/events?q=${encodeURIComponent(search.trim())}`);
@@ -91,6 +121,34 @@ export default function Home() {
 
   return (
     <div>
+      {!bannerDismissed && (bannerText || maintenanceText) && (
+        <div
+          role="status"
+          className={`print:hidden ${
+            maintenanceText
+              ? 'bg-amber-500 text-amber-950'
+              : 'bg-primary-700 text-white'
+          }`}
+        >
+          <div className="container-x flex items-start gap-3 py-2.5 text-sm">
+            {maintenanceText ? (
+              <Info className="mt-0.5 h-4 w-4 shrink-0" />
+            ) : (
+              <Megaphone className="mt-0.5 h-4 w-4 shrink-0" />
+            )}
+            <p className="flex-1">{maintenanceText || bannerText}</p>
+            <button
+              type="button"
+              onClick={() => setBannerDismissed(true)}
+              aria-label="Dismiss announcement"
+              className="rounded-full p-1 transition hover:bg-black/10"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Hero */}
       <section className="relative overflow-hidden bg-navy-900 text-white">
         <div className="absolute -left-32 -top-32 h-96 w-96 rounded-full bg-primary-600/30 blur-3xl" />
@@ -212,6 +270,64 @@ export default function Home() {
           </div>
         </div>
       </section>
+
+      {/* Platform announcements */}
+      {announcements.length > 0 && (
+        <section className="container-x pt-16" aria-labelledby="announcements-heading">
+          <div className="flex items-end justify-between gap-4">
+            <div>
+              <p className="flex items-center gap-2 text-sm font-semibold uppercase tracking-widest text-primary-600">
+                <Megaphone className="h-4 w-4" /> Platform notices
+              </p>
+              <h2 id="announcements-heading" className="mt-2 section-title">
+                What&apos;s happening at Seva Connect
+              </h2>
+            </div>
+          </div>
+          <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {announcements.map((announcement) => (
+              <article key={announcement._id} className="card flex flex-col p-5">
+                <h3 className="font-display text-base font-semibold text-navy-800 dark:text-white">
+                  {announcement.title}
+                </h3>
+                <p className="mt-2 flex-1 whitespace-pre-line text-sm leading-relaxed text-slate-600 dark:text-slate-400">
+                  {announcement.message}
+                </p>
+                <div className="mt-4 flex items-center justify-between gap-3">
+                  <time
+                    dateTime={announcement.publishedAt || announcement.createdAt}
+                    className="text-xs text-slate-400"
+                  >
+                    {new Date(announcement.publishedAt || announcement.createdAt).toLocaleDateString('en', {
+                      day: 'numeric',
+                      month: 'short',
+                      year: 'numeric',
+                    })}
+                  </time>
+                  {announcement.link &&
+                    (announcement.link.startsWith('http') ? (
+                      <a
+                        href={announcement.link}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-xs font-semibold text-primary-600 hover:underline"
+                      >
+                        Learn more <ArrowRight className="inline h-3 w-3" />
+                      </a>
+                    ) : (
+                      <Link
+                        to={announcement.link}
+                        className="text-xs font-semibold text-primary-600 hover:underline"
+                      >
+                        Learn more <ArrowRight className="inline h-3 w-3" />
+                      </Link>
+                    ))}
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* How it works */}
       <section className="container-x py-20">

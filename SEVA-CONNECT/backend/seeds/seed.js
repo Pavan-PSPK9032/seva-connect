@@ -27,10 +27,20 @@ async function seed() {
   const upsertUser = async (data) => {
     const existing = await User.findOne({ email: data.email });
     if (existing) {
+      // Demo accounts must remain usable after email verification shipped.
+      existing.emailVerified = true;
+      existing.emailVerifiedAt = existing.emailVerifiedAt || new Date();
+      existing.termsAcceptedAt = existing.termsAcceptedAt || new Date();
+      await existing.save({ validateBeforeSave: false });
       console.log(`[SEED] user exists: ${data.email}`);
       return existing;
     }
-    const user = await User.create(data);
+    const user = await User.create({
+      ...data,
+      emailVerified: true,
+      emailVerifiedAt: new Date(),
+      termsAcceptedAt: new Date(),
+    });
     console.log(`[SEED] user created: ${data.email}`);
     return user;
   };

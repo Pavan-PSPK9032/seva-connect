@@ -25,7 +25,7 @@ async function getNGOs(req, res, next) {
     const limit = Math.min(30, Math.max(1, parseInt(req.query.limit, 10) || 9));
     const skip = (page - 1) * limit;
 
-    const filter = {};
+    const filter = { status: { $ne: 'suspended' } };
     const q = (req.query.q || '').trim();
     if (q) {
       filter.$or = [
@@ -109,6 +109,13 @@ async function updateNGO(req, res, next) {
       });
     }
 
+    if (ngo.status === 'suspended' && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'This organisation is suspended and its records are read-only.',
+      });
+    }
+
     if (req.body.verified !== undefined && req.user.role !== 'admin') {
       return res.status(403).json({
         success: false,
@@ -160,6 +167,9 @@ async function getNGO(req, res, next) {
   try {
     const ngo = await NGO.findById(req.params.id);
     if (!ngo) {
+      return res.status(404).json({ success: false, message: 'NGO not found.' });
+    }
+    if (ngo.status === 'suspended') {
       return res.status(404).json({ success: false, message: 'NGO not found.' });
     }
 

@@ -59,6 +59,14 @@ const ngoSchema = new mongoose.Schema({
     type: Date,
     default: null,
   },
+  // Administrators may suspend an organisation without deleting its records.
+  // Accounts and records created before this field existed have no value and
+  // are treated as active.
+  status: {
+    type: String,
+    enum: ['active', 'suspended'],
+    default: 'active',
+  },
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
@@ -71,6 +79,7 @@ const ngoSchema = new mongoose.Schema({
 });
 
 ngoSchema.index({ verified: 1 });
+ngoSchema.index({ status: 1 });
 ngoSchema.index({ causes: 1 });
 ngoSchema.index({ organizationName: 1 });
 ngoSchema.index({ createdBy: 1 });

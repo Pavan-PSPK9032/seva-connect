@@ -10,6 +10,7 @@ const Event = require('../models/Event');
 const NGO = require('../models/NGO');
 const Application = require('../models/Application');
 const { notify } = require('../services/notificationService');
+const audit = require('../services/auditService');
 
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -219,6 +220,12 @@ async function createEvent(req, res, next) {
         message: 'You can only create events for NGOs you manage.',
       });
     }
+    if (ngo.status === 'suspended' && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'This organisation is suspended and cannot create new activities.',
+      });
+    }
 
     const event = await Event.create({
       title,
@@ -240,6 +247,15 @@ async function createEvent(req, res, next) {
     });
 
     const populated = await Event.findById(event._id).populate(populate);
+
+    await audit.record(req, {
+      action: 'event.create',
+      entityType: 'Event',
+      entityId: event._id,
+      summary: `Created "${event.title}"`,
+      meta: { ngoId: String(event.ngoId), status: event.status },
+    });
+
     return res.status(201).json({ success: true, message: 'Event created.', data: shapeEvent(populated) });
   } catch (error) {
     next(error);
@@ -266,6 +282,12 @@ async function updateEvent(req, res, next) {
       return res.status(403).json({
         success: false,
         message: 'You can only manage events for NGOs you own.',
+      });
+    }
+    if (ngo.status === 'suspended' && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'This organisation is suspended and its activities are read-only.',
       });
     }
 
@@ -374,6 +396,15 @@ async function updateEvent(req, res, next) {
     }
 
     const populated = await Event.findById(event._id).populate(populate);
+
+    await audit.record(req, {
+      action: 'event.update',
+      entityType: 'Event',
+      entityId: event._id,
+      summary: `Updated "${event.title}"`,
+      meta: { status: event.status, scheduleChanged },
+    });
+
     return res.json({ success: true, message: 'Event updated.', data: shapeEvent(populated) });
   } catch (error) {
     next(error);
@@ -394,8 +425,23 @@ async function deleteEvent(req, res, next) {
         message: 'You can only manage events for NGOs you own.',
       });
     }
+    if (ngo.status === 'suspended' && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'This organisation is suspended and its activities are read-only.',
+      });
+    }
 
     await Event.deleteOne({ _id: event._id });
+
+    await audit.record(req, {
+      action: 'event.delete',
+      entityType: 'Event',
+      entityId: event._id,
+      summary: `Deleted "${event.title}"`,
+      meta: { ngoId: String(event.ngoId) },
+    });
+
     return res.json({ success: true, message: 'Event removed.' });
   } catch (error) {
     next(error);

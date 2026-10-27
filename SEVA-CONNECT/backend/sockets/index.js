@@ -3,16 +3,21 @@
  * Clients connect with a JWT (via handshake.auth.token or an Authorization
  * header). Authenticated sockets join a personal room so targeted
  * notifications can be pushed per user.
+ *
+ * A socket is only accepted when the token is current (tokenVersion match), the
+ * account is active, and the email address is verified — the same rules the
+ * HTTP API enforces.
  */
 const { Server } = require('socket.io');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const { getAllowedOrigins } = require('../config/cors');
+const { isEmailVerified } = require('../utils/email');
 
 function attachSockets(httpServer) {
   const io = new Server(httpServer, {
     cors: {
-      origin: getAllowedOrigins().length ? getAllowedOrigins() : true,
+      origin: getAllowedOrigins(),
       credentials: true,
     },
   });
@@ -32,6 +37,16 @@ function attachSockets(httpServer) {
       const user = await User.findById(decoded.id);
       if (!user) {
         return next(new Error('User not found'));
+      }
+      const tokenVersion = typeof decoded.tv === 'number' ? decoded.tv : 0;
+      if (tokenVersion !== (user.tokenVersion || 0)) {
+        return next(new Error('Session has ended'));
+      }
+      if (user.accountStatus === 'suspended') {
+        return next(new Error('Account suspended'));
+      }
+      if (!isEmailVerified(user)) {
+        return next(new Error('Email not verified'));
       }
       socket.userId = String(user._id);
       socket.user = user;
