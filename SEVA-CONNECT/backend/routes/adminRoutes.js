@@ -15,7 +15,7 @@ const validate = require('../middleware/validate');
 const idParam = (name = 'id') => param(name).isMongoId().withMessage(`Invalid ${name}`);
 
 const ROLES = ['volunteer', 'ngo', 'admin'];
-const EVENT_STATUSES = ['draft', 'upcoming', 'ongoing', 'completed', 'cancelled', 'archived'];
+const EVENT_STATUSES = ['draft', 'pending_approval', 'upcoming', 'ongoing', 'completed', 'cancelled', 'archived'];
 
 router.use(protect, authorize('admin'));
 
@@ -68,6 +68,17 @@ router.patch(
 );
 
 router.patch(
+  '/ngos/:id/approval',
+  [idParam()],
+  body('decision')
+    .isIn(['approved', 'rejected', 'changes_requested'])
+    .withMessage('Decision must be approved, rejected or changes_requested'),
+  body('reason').optional({ values: 'falsy' }).isString().trim().isLength({ max: 1000 }),
+  validate,
+  adminController.reviewNGO
+);
+
+router.patch(
   '/ngos/:id/status',
   [idParam()],
   body('status').isIn(['active', 'suspended']).withMessage('Status must be active or suspended'),
@@ -84,6 +95,17 @@ router.patch(
   body('status').isIn(EVENT_STATUSES).withMessage('Invalid event status'),
   validate,
   adminController.setEventStatus
+);
+
+router.patch(
+  '/events/:id/approval',
+  [idParam()],
+  body('decision')
+    .isIn(['approved', 'rejected', 'changes_requested'])
+    .withMessage('Decision must be approved, rejected or changes_requested'),
+  body('reason').optional({ values: 'falsy' }).isString().trim().isLength({ max: 1000 }),
+  validate,
+  adminController.reviewEvent
 );
 
 /* -------------------------------- Applications ------------------------------ */

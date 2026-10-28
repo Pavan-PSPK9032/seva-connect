@@ -480,6 +480,11 @@ export default function Dashboard() {
                         {application.coverNote}
                       </p>
                     )}
+                    {application.status === 'rejected' && application.decisionNote && (
+                      <p className="mt-2 rounded-xl bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-500/10 dark:text-red-300">
+                        Reason: {application.decisionNote}
+                      </p>
+                    )}
 
                     <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
                       <p className="text-xs text-slate-500">

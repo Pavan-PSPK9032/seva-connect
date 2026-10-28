@@ -30,8 +30,8 @@ interface AuthContextValue {
   ) => Promise<{ user: User; isNewUser: boolean }>;
   linkGoogle: (credential: string, nonce: string) => Promise<User>;
   register: (input: RegisterInput) => Promise<RegisterResult>;
-  verifyEmail: (email: string, otp: string) => Promise<User>;
-  resendVerification: (
+  verifyEmail?: (email: string, otp: string) => Promise<User>;
+  resendVerification?: (
     email: string
   ) => Promise<{ message?: string; retryAfter?: number; expiresInSeconds?: number }>;
   refreshUser: () => Promise<User>;
@@ -93,30 +93,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return {
       email: res.user.email || input.email,
       message: res.message,
-      user: res.user,
-      token: res.token,
-    } as any;
-  };
-
-  /** Consume the OTP and sign in atomically on success. */
-  const verifyEmail = async (email: string, otp: string): Promise<User> => {
-    const res = await apiPost<AuthResult>('/auth/verify-email', { email, otp });
-    if (!res.success || !res.token || !res.user) {
-      throw new Error(res.message || 'Verification failed');
-    }
-    persist({ token: res.token, user: res.user });
-    return res.user;
-  };
-
-  const resendVerification = async (
-    email: string
-  ): Promise<{ message?: string; retryAfter?: number; expiresInSeconds?: number }> => {
-    const res = await apiPost<VerificationChallenge>('/auth/resend-verification', { email });
-    if (!res.success) throw new Error(res.message || 'Could not resend the code');
-    return {
-      message: res.message,
-      retryAfter: res.retryAfter,
-      expiresInSeconds: res.expiresInSeconds,
     };
   };
 
@@ -173,8 +149,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         loginWithGoogle,
         linkGoogle,
         register,
-        verifyEmail,
-        resendVerification,
         refreshUser,
         changePassword,
         logout,

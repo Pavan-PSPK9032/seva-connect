@@ -10,6 +10,7 @@ const { protect, authorize } = require('../middleware/auth');
 const validate = require('../middleware/validate');
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}/;
+const EMAIL_RE = /^\S+@\S+\.\S+$/;
 
 const eventBody = ({ update = false } = {}) => {
   const rules = [
@@ -22,13 +23,37 @@ const eventBody = ({ update = false } = {}) => {
     body('causes').optional().isArray().withMessage('Causes must be a list'),
     body('requiredSkills').optional().isArray().withMessage('Required skills must be a list'),
     body('eligibility').optional().trim().isLength({ max: 500 }).withMessage('Eligibility is too long'),
+    body('image')
+      .optional({ values: 'falsy' })
+      .trim()
+      .isLength({ max: 500 })
+      .withMessage('Image URL is too long'),
+    body('category').optional({ values: 'falsy' }).trim().isLength({ max: 80 }).withMessage('Category is too long'),
+    body('contactEmail')
+      .optional({ values: 'falsy' })
+      .trim()
+      .toLowerCase()
+      .matches(EMAIL_RE)
+      .withMessage('Contact email must be a valid address'),
+    body('contactPhone').optional({ values: 'falsy' }).trim().isLength({ max: 30 }).withMessage('Contact phone is too long'),
+    body('instructions')
+      .optional({ values: 'falsy' })
+      .trim()
+      .isLength({ max: 2000 })
+      .withMessage('Instructions cannot exceed 2000 characters'),
     body('applicationDeadline')
       .optional({ values: 'falsy' })
       .matches(DATE_RE)
       .withMessage('Application deadline must be a date (YYYY-MM-DD)')
       .toDate(),
     body('requiredVolunteers').optional({ values: 'falsy' }).isInt({ min: 1 }).toInt(),
-    body('status').optional().isIn(['draft', 'upcoming', 'ongoing', 'completed', 'cancelled', 'archived']).withMessage('Invalid status'),
+    // Owners may cancel/complete/ongoing their own events; publishing is an
+    // administrator action. Validators accept the full enum so the controller
+    // can enforce the role-specific rules.
+    body('status')
+      .optional()
+      .isIn(['draft', 'pending_approval', 'upcoming', 'ongoing', 'completed', 'cancelled', 'archived'])
+      .withMessage('Invalid status'),
   ];
   if (update) {
     return rules.map((r) => r.optional());

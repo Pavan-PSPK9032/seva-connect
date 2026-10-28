@@ -13,11 +13,11 @@ const mongoose = require('mongoose');
 
 const models = [
   require('../models/User'),
-  require('../models/EmailVerification'),
   require('../models/Announcement'),
   require('../models/PlatformSetting'),
   require('../models/NGO'),
   require('../models/Event'),
+  require('../models/Application'),
 ];
 
 async function main() {

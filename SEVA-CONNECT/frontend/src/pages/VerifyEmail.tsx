@@ -30,7 +30,9 @@ function homeForRole(role: Role): string {
 }
 
 export default function VerifyEmail() {
-  const { verifyEmail, resendVerification } = useAuth();
+  const auth = useAuth() as any;
+  const verifyEmail = auth.verifyEmail;
+  const resendVerification = auth.resendVerification;
   const { toast } = useToast();
   const navigate = useNavigate();
   const location = useLocation();
@@ -135,7 +137,8 @@ export default function VerifyEmail() {
     setError(null);
     setInfo(null);
     try {
-      const user = await verifyEmail(email, code);
+      const user = await verifyEmail?.(email, code);
+      if (!user) { setError('Verification not available'); verifyingRef.current = false; setVerifying(false); return; }
       sessionStorage.removeItem(PENDING_EMAIL_KEY);
       toast('success', 'Email verified', `Welcome to Seva Connect, ${user.name.split(' ')[0]}.`);
       navigate(state.from || homeForRole(user.role), { replace: true });
@@ -189,6 +192,10 @@ export default function VerifyEmail() {
 
   const resend = async () => {
     if (cooldown > 0 || !email) return;
+    if (!resendVerification) {
+      setError('Email verification is no longer required. Please sign in.');
+      return;
+    }
     setResending(true);
     setError(null);
     setInfo(null);

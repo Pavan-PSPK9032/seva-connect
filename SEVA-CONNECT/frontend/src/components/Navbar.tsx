@@ -142,7 +142,7 @@ export default function Navbar() {
                     <p className="truncate text-xs capitalize text-slate-500">{user.role}</p>
                     {user.emailVerified === false && (
                       <Link
-                        to="/verify-email"
+                        to="/login"
                         state={{ email: user.email }}
                         onClick={() => setProfileOpen(false)}
                         className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800 hover:bg-amber-200 dark:bg-amber-500/15 dark:text-amber-300"
@@ -267,7 +267,7 @@ export default function Navbar() {
               <div className="mt-1 flex flex-col gap-1 border-t border-navy-700/10 pt-2 dark:border-white/10">
                 {user.emailVerified === false && (
                   <NavLink
-                    to="/verify-email"
+                    to="/login"
                     state={{ email: user.email }}
                     onClick={() => setOpen(false)}
                     className="flex items-center gap-1.5 rounded-lg bg-amber-100 px-3 py-2.5 text-sm font-semibold text-amber-800 dark:bg-amber-500/15 dark:text-amber-300"

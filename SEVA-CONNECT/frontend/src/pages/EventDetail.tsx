@@ -161,8 +161,9 @@ export default function EventDetail() {
   const spots = Math.max(0, required - registered);
   const full = required > 0 && spots === 0;
   const deadlinePassed = Boolean(event.applicationDeadline) && new Date(event.applicationDeadline as string).getTime() < Date.now();
+  const isApprovedEvent = event.approvalStatus === 'approved' || event.status === 'upcoming' || event.status === 'ongoing';
   const closed = event.status !== 'upcoming' && event.status !== 'ongoing';
-  const canApply = !full && !deadlinePassed && !closed;
+  const canApply = !full && !deadlinePassed && !closed && isApprovedEvent;
   const capacityPct = required > 0 ? Math.min(100, Math.round((registered / required) * 100)) : 0;
 
   return (
@@ -270,7 +271,7 @@ export default function EventDetail() {
                   Manage in NGO dashboard
                 </Link>
               ) : !user ? (
-                <Link to="/login" className="btn btn-primary w-full">
+                <Link to={`/login?next=/events/${id}`} state={{ from: `/events/${id}` }} className="btn btn-primary w-full">
                   Log in to apply
                 </Link>
               ) : !isVolunteer ? (

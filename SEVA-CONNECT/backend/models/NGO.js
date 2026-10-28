@@ -29,6 +29,19 @@ const ngoSchema = new mongoose.Schema({
     trim: true,
     match: [EMAIL_RE, 'Please provide a valid contact email'],
   },
+  contactPhone: {
+    type: String,
+    trim: true,
+    maxlength: [30, 'Contact phone cannot exceed 30 characters'],
+    default: '',
+  },
+  // Structured address, kept separate from the short operating location.
+  address: {
+    type: String,
+    trim: true,
+    maxlength: [300, 'Address cannot exceed 300 characters'],
+    default: '',
+  },
   causes: {
     type: [String],
     default: [],
@@ -40,6 +53,30 @@ const ngoSchema = new mongoose.Schema({
   logo: {
     type: String,
     default: '',
+  },
+  // Registration / verification details supplied by the organisation.
+  registrationNumber: {
+    type: String,
+    trim: true,
+    maxlength: [120, 'Registration number cannot exceed 120 characters'],
+    default: '',
+  },
+  registrationDetails: {
+    type: String,
+    trim: true,
+    maxlength: [1000, 'Registration details cannot exceed 1000 characters'],
+    default: '',
+  },
+  // Supporting documents are stored as links (name + URL) so admins can review
+  // them without granting upload access to the public API.
+  documents: {
+    type: [
+      {
+        name: { type: String, trim: true, maxlength: 120, default: '' },
+        url: { type: String, trim: true, maxlength: 500, default: '' },
+      },
+    ],
+    default: [],
   },
   verified: {
     type: Boolean,
@@ -56,6 +93,11 @@ const ngoSchema = new mongoose.Schema({
     default: '',
   },
   // Admin approval status - NGO must be approved by admin before users can participate
+  approvalStatus: {
+    type: String,
+    enum: ['pending', 'approved', 'rejected', 'changes_requested', 'suspended'],
+    default: 'pending',
+  },
   approved: {
     type: Boolean,
     default: false,
@@ -65,6 +107,26 @@ const ngoSchema = new mongoose.Schema({
     default: null,
   },
   approvedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null,
+  },
+  // Reason shown to the organisation when a submission is rejected or returned.
+  rejectionReason: {
+    type: String,
+    trim: true,
+    maxlength: [1000, 'Reason cannot exceed 1000 characters'],
+    default: '',
+  },
+  submittedAt: {
+    type: Date,
+    default: Date.now,
+  },
+  reviewedAt: {
+    type: Date,
+    default: null,
+  },
+  reviewedBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
     default: null,

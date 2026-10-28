@@ -41,6 +41,14 @@ const applicationSchema = new mongoose.Schema({
     maxlength: [1000, 'Message cannot exceed 1000 characters'],
     default: '',
   },
+  // Optional message from the organisation when a request is rejected or
+  // returned for corrections. Shown on the volunteer dashboard.
+  decisionNote: {
+    type: String,
+    trim: true,
+    maxlength: [500, 'Note cannot exceed 500 characters'],
+    default: '',
+  },
   // Verified hours credited on completion; the basis for certificates.
   hoursCredited: {
     type: Number,

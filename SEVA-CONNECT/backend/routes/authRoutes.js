@@ -1,9 +1,8 @@
 /**
- * Auth routes — public registration, email OTP verification, login, logout and
- * password recovery.
+ * Auth routes — public registration, login, logout and password recovery.
  *
- * Dedicated limiters protect brute-force and OTP-abuse surfaces in addition to
- * the per-challenge limits enforced inside services/otpService.js.
+ * Dedicated limiters protect brute-force surfaces in addition to the
+ * per-account limits enforced inside the controllers.
  */
 const router = require('express').Router();
 const rateLimit = require('express-rate-limit');
@@ -16,13 +15,10 @@ const validate = require('../middleware/validate');
 const limiterMessage = (message) => ({ success: false, message });
 
 // Route-level brute-force limits are intentionally high under NODE_ENV=test so
-// the integration suite can exercise many flows in one process. Per-challenge
-// OTP limits and the hourly send cap live in services/otpService.js and are
-// still enforced in tests. Production always uses the values shown here.
+// the integration suite can exercise many flows in one process. Production
+// always uses the values shown here.
 const testMode = process.env.NODE_ENV === 'test';
 const authMax = testMode ? 1000 : 20;
-const verifyMax = testMode ? 1000 : 30;
-const resendMax = testMode ? 1000 : 6;
 const passwordMax = testMode ? 1000 : 10;
 const googleMax = testMode ? 1000 : 20;
 
@@ -32,24 +28,6 @@ const authLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: limiterMessage('Too many attempts. Please try again later.'),
-});
-
-// Verification attempts are cheap to submit but expensive to guess; allow a
-// normal amount of typos while still cutting off automated guessing.
-const verifyLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: verifyMax,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: limiterMessage('Too many verification attempts. Please try again later.'),
-});
-
-const resendLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: resendMax,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: limiterMessage('Too many code requests. Please try again later.'),
 });
 
 const googleLimiter = rateLimit({
@@ -94,18 +72,6 @@ const registerRules = [
     .withMessage('Please accept the terms and privacy policy to continue'),
 ];
 
-const verifyRules = [
-  body('email').trim().isEmail().withMessage('Please provide a valid email address').normalizeEmail(),
-  body('otp')
-    .trim()
-    .matches(/^\d{6}$/)
-    .withMessage('Enter the six-digit code from your email'),
-];
-
-const resendRules = [
-  body('email').trim().isEmail().withMessage('Please provide a valid email address').normalizeEmail(),
-];
-
 const googleRules = [
   body('credential')
     .isString()
@@ -146,14 +112,6 @@ const resetRules = [
 ];
 
 router.post('/register', authLimiter, registerRules, validate, authController.register);
-router.post('/verify-email', verifyLimiter, verifyRules, validate, authController.verifyEmail);
-router.post(
-  '/resend-verification',
-  resendLimiter,
-  resendRules,
-  validate,
-  authController.resendVerification
-);
 
 router.post('/login', authLimiter, loginRules, validate, authController.login);
 router.post('/google', googleLimiter, googleRules, validate, authController.googleSignIn);

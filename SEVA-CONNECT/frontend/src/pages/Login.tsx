@@ -17,9 +17,9 @@ const loginSchema = z.object({
 type LoginForm = z.infer<typeof loginSchema>;
 
 function homeForRole(role: Role): string {
-  if (role === 'admin') return '/admin';
-  if (role === 'ngo') return '/my-ngo';
-  return '/dashboard';
+  if (role === 'admin') return '/admin/dashboard';
+  if (role === 'ngo') return '/organization/dashboard';
+  return '/volunteer/dashboard';
 }
 
 export default function Login() {
@@ -38,7 +38,8 @@ export default function Login() {
 
   const destination = (userRole: Role) => {
     const from = (location.state as { from?: string } | null)?.from;
-    return from || homeForRole(userRole);
+    const queryNext = new URLSearchParams(location.search).get('next');
+    return from || queryNext || homeForRole(userRole);
   };
 
   const onSubmit = async (values: LoginForm) => {
@@ -49,14 +50,7 @@ export default function Login() {
       navigate(destination(user.role), { replace: true });
     } catch (err) {
       const message = apiErrorMessage(err, 'Login failed. Please try again.');
-      const code = (err as { response?: { data?: { code?: string } } })?.response?.data?.code;
-      const email = (err as { response?: { data?: { email?: string } } })?.response?.data?.email;
-
-      if (code === 'EMAIL_NOT_VERIFIED') {
-        toast('info', 'Email not verified', message);
-        navigate('/verify-email', { state: { email: email || values.email } });
-        return;
-      }
+      // Email verification removed
 
       setServerError(message);
       toast('error', 'Login failed', message);
@@ -110,17 +104,9 @@ export default function Login() {
           </div>
         )}
 
-        {import.meta.env.PROD ? (
-          <p className="mt-6 rounded-xl bg-navy-50 px-4 py-3 text-center text-xs text-navy-600 dark:bg-white/5 dark:text-slate-400">
-            Accounts are created via registration. Use your email and password, or continue with
-            Google.
-          </p>
-        ) : (
-          <p className="mt-6 rounded-xl bg-primary-50 px-4 py-3 text-center text-xs text-primary-800 dark:bg-primary-500/10 dark:text-primary-200">
-            Demo credentials — <b>demo@sevaconnect.com / 123456</b> (volunteer) or <b>admin@sevaconnect.com / admin123</b> (admin).
-            Passwords are stored hashed; no password is kept in LocalStorage.
-          </p>
-        )}
+        <p className="mt-6 rounded-xl bg-navy-50 px-4 py-3 text-center text-xs text-navy-600 dark:bg-white/5 dark:text-slate-400">
+          Use your email and password, or continue with Google.
+        </p>
 
         <form onSubmit={handleSubmit(onSubmit)} className="mt-6 space-y-4" noValidate>
           <div>

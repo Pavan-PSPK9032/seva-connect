@@ -5,28 +5,82 @@
  *            POST /api/events     — create for own NGO (ngo/admin)
  *            PATCH /api/events/:id — update (owner NGO/admin)
  *            DELETE /api/events/:id — delete (owner NGO/admin)
+ *
+ * New events start as `pending_approval` and require administrator approval.
+ * Only approved events from approved, active organisations are public.
  */
 const Event = require('../models/Event');
 const NGO = require('../models/NGO');
 const Application = require('../models/Application');
 const { notify } = require('../services/notificationService');
 const audit = require('../services/auditService');
+const { ngoIsApproved, eventIsApproved, approvedEventClause } = require('../utils/approval');
 
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 function canManageNGO(user, ngo) {
+  if (!user || !ngo) return false;
   if (user.role === 'admin') return true;
   return ngo.createdBy && ngo.createdBy.toString() === String(user._id);
 }
 
-const populate = { path: 'ngoId', select: 'organizationName verified logo' };
+const populate = { path: 'ngoId', select: 'organizationName verified approved approvalStatus logo location status contactEmail' };
 
 function shapeEvent(ev) {
   const doc = ev.toObject();
   doc.ngoName = doc.ngoId ? doc.ngoId.organizationName : '';
   doc.ngoVerified = doc.ngoId ? doc.ngoId.verified : false;
+  doc.ngoApproved = doc.ngoId ? ngoIsApproved(doc.ngoId) : false;
   doc.ngoLogo = doc.ngoId ? doc.ngoId.logo : '';
   return doc;
+}
+
+function pickEventFields(body) {
+  const fields = {};
+  const strings = ['title', 'description', 'time', 'location', 'image', 'category', 'contactEmail', 'contactPhone', 'instructions', 'eligibility'];
+  strings.forEach((key) => {
+    if (body[key] !== undefined) fields[key] = String(body[key]).trim();
+  });
+  if (body.date !== undefined && body.date) fields.date = body.date;
+  if (body.online !== undefined) fields.online = body.online === true;
+  if (Array.isArray(body.causes)) fields.causes = body.causes.map((c) => String(c).trim()).filter(Boolean);
+  if (Array.isArray(body.requiredSkills)) {
+    fields.requiredSkills = body.requiredSkills.map((s) => String(s).trim()).filter(Boolean);
+  }
+  if (body.applicationDeadline !== undefined) fields.applicationDeadline = body.applicationDeadline || null;
+  if (body.requiredVolunteers !== undefined && body.requiredVolunteers !== '') {
+    fields.requiredVolunteers = body.requiredVolunteers;
+  }
+  return fields;
+}
+
+// Only fields that materially change what a volunteer agreed to join.
+const MATERIAL_FIELDS = [
+  'title',
+  'description',
+  'date',
+  'time',
+  'location',
+  'online',
+  'causes',
+  'requiredSkills',
+  'eligibility',
+  'applicationDeadline',
+  'requiredVolunteers',
+  'image',
+  'category',
+  'instructions',
+];
+
+async function getApprovedNGOIds() {
+  const ngos = await NGO.find({
+    status: { $ne: 'suspended' },
+    $or: [
+      { approvalStatus: 'approved' },
+      { approvalStatus: { $exists: false }, $or: [{ approved: true }, { verified: true }] },
+    ],
+  }).select('_id');
+  return ngos.map((ngo) => ngo._id);
 }
 
 async function getEvents(req, res, next) {
@@ -35,34 +89,38 @@ async function getEvents(req, res, next) {
     const limit = Math.min(30, Math.max(1, parseInt(req.query.limit, 10) || 9));
     const skip = (page - 1) * limit;
 
-    const filter = { approved: true };
-    if (req.query.status) {
-      filter.status = { $in: req.query.status.split(',') };
-    } else {
-      filter.status = { $in: ['upcoming', 'ongoing'] };
-    }
+    const approvedNgoIds = await getApprovedNGOIds();
+    const filter = {
+      $and: [
+        approvedEventClause(),
+        { ngoId: { $in: approvedNgoIds } },
+        { status: req.query.status ? { $in: req.query.status.split(',') } : { $in: ['upcoming', 'ongoing'] } },
+      ],
+    };
 
     const q = (req.query.q || '').trim();
     if (q) {
-      filter.$or = [
-        { title: { $regex: escapeRegex(q), $options: 'i' } },
-        { description: { $regex: escapeRegex(q), $options: 'i' } },
-        { location: { $regex: escapeRegex(q), $options: 'i' } },
-        { causes: { $regex: escapeRegex(q), $options: 'i' } },
-        { requiredSkills: { $regex: escapeRegex(q), $options: 'i' } },
-      ];
+      filter.$and.push({
+        $or: [
+          { title: { $regex: escapeRegex(q), $options: 'i' } },
+          { description: { $regex: escapeRegex(q), $options: 'i' } },
+          { location: { $regex: escapeRegex(q), $options: 'i' } },
+          { causes: { $regex: escapeRegex(q), $options: 'i' } },
+          { requiredSkills: { $regex: escapeRegex(q), $options: 'i' } },
+        ],
+      });
     }
     if (req.query.cause) {
-      filter.causes = { $regex: `^${escapeRegex(req.query.cause)}$`, $options: 'i' };
+      filter.$and.push({ causes: { $regex: `^${escapeRegex(req.query.cause)}$`, $options: 'i' } });
     }
     if (req.query.skill) {
-      filter.requiredSkills = { $regex: escapeRegex(String(req.query.skill).trim()), $options: 'i' };
+      filter.$and.push({ requiredSkills: { $regex: escapeRegex(String(req.query.skill).trim()), $options: 'i' } });
     }
-    if (req.query.online === 'true') filter.online = true;
-    if (req.query.online === 'false') filter.online = false;
-    if (req.query.ngoId) filter.ngoId = req.query.ngoId;
+    if (req.query.online === 'true') filter.$and.push({ online: true });
+    if (req.query.online === 'false') filter.$and.push({ online: false });
+    if (req.query.ngoId) filter.$and.push({ ngoId: req.query.ngoId });
     if (req.query.hasSeats === 'true') {
-      filter.$expr = { $lt: ['$registeredVolunteers', '$requiredVolunteers'] };
+      filter.$and.push({ $expr: { $lt: ['$registeredVolunteers', '$requiredVolunteers'] } });
     }
 
     const order = req.query.order === 'desc' ? -1 : 1;
@@ -72,11 +130,7 @@ async function getEvents(req, res, next) {
     if (req.query.sort === 'popular') sort = { registeredVolunteers: -1, date: 1 };
 
     const [items, total] = await Promise.all([
-      Event.find(filter)
-        .populate(populate)
-        .sort(sort)
-        .skip(skip)
-        .limit(limit),
+      Event.find(filter).populate(populate).sort(sort).skip(skip).limit(limit),
       Event.countDocuments(filter),
     ]);
 
@@ -95,24 +149,16 @@ async function getEvent(req, res, next) {
   try {
     const event = await Event.findById(req.params.id).populate({
       path: 'ngoId',
-      select: 'organizationName description verified logo location website contactEmail causes',
+      select: 'organizationName description verified approved approvalStatus logo location website contactEmail contactPhone causes status',
     });
 
     if (!event) {
       return res.status(404).json({ success: false, message: 'Event not found.' });
     }
-    if (!event.approved) {
-      if (!req.user) {
-        return res.status(404).json({ success: false, message: 'Event not found.' });
-      }
-      if (req.user.role === 'admin') {
-        // allow
-      } else {
-        const ngo = await NGO.findById(event.ngoId);
-        if (!ngo || !canManageNGO(req.user, ngo)) {
-          return res.status(404).json({ success: false, message: 'Event not found.' });
-        }
-      }
+
+    const ownerOrAdmin = canManageNGO(req.user, event.ngoId);
+    if (!eventIsApproved(event) && !ownerOrAdmin) {
+      return res.status(404).json({ success: false, message: 'Event not found.' });
     }
 
     const doc = shapeEvent(event);
@@ -122,25 +168,25 @@ async function getEvent(req, res, next) {
         organizationName: event.ngoId.organizationName,
         description: event.ngoId.description,
         verified: event.ngoId.verified,
+        approved: ngoIsApproved(event.ngoId),
         logo: event.ngoId.logo,
         location: event.ngoId.location,
         website: event.ngoId.website,
         contactEmail: event.ngoId.contactEmail,
+        contactPhone: event.ngoId.contactPhone,
         causes: event.ngoId.causes,
       };
     }
 
+    const approvedNgoIds = await getApprovedNGOIds();
     const relatedFilter = {
       _id: { $ne: event._id },
       status: { $in: ['upcoming', 'ongoing'] },
+      $and: [approvedEventClause(), { ngoId: { $in: approvedNgoIds } }],
     };
     if (event.causes && event.causes.length) relatedFilter.causes = { $in: event.causes };
 
-    const related = await Event.find(relatedFilter)
-      .populate(populate)
-      .sort({ date: 1 })
-      .limit(3);
-
+    const related = await Event.find(relatedFilter).populate(populate).sort({ date: 1 }).limit(3);
     doc.related = related.map(shapeEvent);
 
     return res.json({ success: true, data: doc });
@@ -158,8 +204,14 @@ async function getRecommended(req, res, next) {
       return res.status(403).json({ success: false, message: 'Recommendations are for volunteer accounts.' });
     }
 
+    const approvedNgoIds = await getApprovedNGOIds();
     const [events, applied] = await Promise.all([
-      Event.find({ status: { $in: ['upcoming', 'ongoing'] } }).populate(populate).limit(120),
+      Event.find({
+        status: { $in: ['upcoming', 'ongoing'] },
+        $and: [approvedEventClause(), { ngoId: { $in: approvedNgoIds } }],
+      })
+        .populate(populate)
+        .limit(120),
       Application.find({
         volunteerId: req.user._id,
         status: { $in: ['pending', 'approved', 'completed'] },
@@ -207,11 +259,10 @@ async function getRecommended(req, res, next) {
 // GET /api/events/mine
 async function getMyEvents(req, res, next) {
   try {
-    const ngos = await NGO.find({ createdBy: req.user._id }).select('_id');
+    const filter = req.user.role === 'admin' ? {} : { createdBy: req.user._id };
+    const ngos = await NGO.find(filter).select('_id');
     const ids = ngos.map((n) => n._id);
-    const items = await Event.find({ ngoId: { $in: ids } })
-      .populate(populate)
-      .sort({ date: 1 });
+    const items = await Event.find({ ngoId: { $in: ids } }).populate(populate).sort({ date: 1 });
     res.json({ success: true, data: items.map(shapeEvent) });
   } catch (error) {
     next(error);
@@ -221,9 +272,7 @@ async function getMyEvents(req, res, next) {
 // POST /api/events
 async function createEvent(req, res, next) {
   try {
-    const { title, description, date, time, location, online, causes, ngoId, requiredVolunteers, status } = req.body;
-
-    const ngo = await NGO.findById(ngoId);
+    const ngo = await NGO.findById(req.body.ngoId);
     if (!ngo) {
       return res.status(404).json({ success: false, message: 'NGO not found.' });
     }
@@ -233,37 +282,31 @@ async function createEvent(req, res, next) {
         message: 'You can only create events for NGOs you manage.',
       });
     }
-    if (ngo.status === 'suspended' && req.user.role !== 'admin') {
+    if (ngo.status === 'suspended') {
       return res.status(403).json({
         success: false,
         message: 'This organisation is suspended and cannot create new activities.',
       });
     }
-    if (!ngo.approved && req.user.role !== 'admin') {
+    if (!ngoIsApproved(ngo) && req.user.role !== 'admin') {
       return res.status(403).json({
         success: false,
-        message: 'This NGO must be approved by an admin before creating events.',
+        message: 'This organisation must be approved by an administrator before creating events.',
       });
     }
 
+    const isAdmin = req.user.role === 'admin';
     const event = await Event.create({
-      title,
-      description,
-      date,
-      time,
-      location,
-      online: online === true,
-      causes: Array.isArray(causes) ? causes.map((c) => String(c).trim()).filter(Boolean) : [],
-      requiredSkills: Array.isArray(req.body.requiredSkills)
-        ? req.body.requiredSkills.map((s) => String(s).trim()).filter(Boolean)
-        : [],
-      eligibility: req.body.eligibility || '',
-      applicationDeadline: req.body.applicationDeadline || null,
-      ngoId,
-      requiredVolunteers: requiredVolunteers || undefined,
+      ...pickEventFields(req.body),
+      ngoId: ngo._id,
       registeredVolunteers: 0,
-      status: 'pending_approval',
-      approved: false,
+      rejectionReason: '',
+      submittedAt: new Date(),
+      approved: isAdmin,
+      approvalStatus: isAdmin ? 'approved' : 'pending',
+      approvedAt: isAdmin ? new Date() : null,
+      approvedBy: isAdmin ? req.user._id : null,
+      status: isAdmin ? 'upcoming' : 'pending_approval',
     });
 
     const populated = await Event.findById(event._id).populate(populate);
@@ -272,11 +315,17 @@ async function createEvent(req, res, next) {
       action: 'event.create',
       entityType: 'Event',
       entityId: event._id,
-      summary: `Created "${event.title}" (pending approval)`,
+      summary: `Created "${event.title}" (${event.approvalStatus})`,
       meta: { ngoId: String(event.ngoId), status: event.status },
     });
 
-    return res.status(201).json({ success: true, message: 'Event created. It is pending admin approval before volunteers can participate.', data: shapeEvent(populated) });
+    return res.status(201).json({
+      success: true,
+      message: isAdmin
+        ? 'Event created and published.'
+        : 'Event submitted. It is pending administrator approval and is not public yet.',
+      data: shapeEvent(populated),
+    });
   } catch (error) {
     next(error);
   }
@@ -289,13 +338,6 @@ async function updateEvent(req, res, next) {
     if (!event) {
       return res.status(404).json({ success: false, message: 'Event not found.' });
     }
-
-    const previous = {
-      status: event.status,
-      date: event.date ? new Date(event.date).toISOString() : null,
-      time: event.time,
-      location: event.location,
-    };
 
     const ngo = await NGO.findById(event.ngoId);
     if (!canManageNGO(req.user, ngo)) {
@@ -311,10 +353,28 @@ async function updateEvent(req, res, next) {
       });
     }
 
-    const { title, description, date, time, location, online, causes, ngoId, requiredVolunteers, status } = req.body;
+    const previous = {
+      status: event.status,
+      date: event.date ? new Date(event.date).toISOString() : null,
+      time: event.time,
+      location: event.location,
+    };
 
-    if (ngoId && String(ngoId) !== String(event.ngoId)) {
-      const target = await NGO.findById(ngoId);
+    const fields = pickEventFields(req.body);
+    const changedKeys = Object.keys(fields).filter((key) => {
+      if (key === 'date') {
+        return new Date(fields.date).toISOString() !== previous.date;
+      }
+      return JSON.stringify(fields[key]) !== JSON.stringify(event[key]);
+    });
+    Object.entries(fields).forEach(([key, value]) => {
+      event[key] = value;
+    });
+
+    // Moving an event to a different NGO is only allowed between organisations
+    // the caller manages.
+    if (req.body.ngoId && String(req.body.ngoId) !== String(event.ngoId)) {
+      const target = await NGO.findById(req.body.ngoId);
       if (!target) {
         return res.status(404).json({ success: false, message: 'Target NGO not found.' });
       }
@@ -324,25 +384,34 @@ async function updateEvent(req, res, next) {
           message: 'You can only move events between NGOs you manage.',
         });
       }
-      event.ngoId = ngoId;
+      event.ngoId = target._id;
     }
 
-    if (title !== undefined) event.title = title;
-    if (description !== undefined) event.description = description;
-    if (date !== undefined) event.date = date;
-    if (time !== undefined) event.time = time;
-    if (location !== undefined) event.location = location;
-    if (online !== undefined) event.online = online === true;
-    if (Array.isArray(causes)) event.causes = causes.map((c) => String(c).trim()).filter(Boolean);
-    if (Array.isArray(req.body.requiredSkills)) {
-      event.requiredSkills = req.body.requiredSkills.map((s) => String(s).trim()).filter(Boolean);
+    // Owners may cancel or complete their own event, but cannot publish it
+    // themselves. Publishing is an administrator action.
+    const requestedStatus = req.body.status;
+    if (requestedStatus !== undefined && req.user.role === 'admin') {
+      event.status = requestedStatus;
+    } else if (requestedStatus === 'cancelled' || requestedStatus === 'completed' || requestedStatus === 'ongoing') {
+      event.status = requestedStatus;
     }
-    if (req.body.eligibility !== undefined) event.eligibility = req.body.eligibility;
-    if (req.body.applicationDeadline !== undefined) {
-      event.applicationDeadline = req.body.applicationDeadline || null;
+
+    const materiallyChanged = changedKeys.some((key) => MATERIAL_FIELDS.includes(key));
+    const needsReview =
+      req.user.role !== 'admin' &&
+      materiallyChanged &&
+      event.approvalStatus === 'approved' &&
+      event.status !== 'cancelled' &&
+      event.status !== 'completed';
+    if (needsReview) {
+      event.approvalStatus = 'pending';
+      event.approved = false;
+      event.approvedAt = null;
+      event.approvedBy = null;
+      event.status = 'pending_approval';
+      event.rejectionReason = '';
+      event.submittedAt = new Date();
     }
-    if (requiredVolunteers !== undefined) event.requiredVolunteers = requiredVolunteers;
-    if (status !== undefined) event.status = status;
 
     await event.save();
 
@@ -352,13 +421,10 @@ async function updateEvent(req, res, next) {
       location: event.location,
     };
     const scheduleChanged =
-      current.date !== previous.date ||
-      current.time !== previous.time ||
-      current.location !== previous.location;
+      current.date !== previous.date || current.time !== previous.time || current.location !== previous.location;
 
     if (previous.status !== 'cancelled' && event.status === 'cancelled') {
-      // Cancelling an opportunity releases approved seats and closes every
-      // still-open application, notifying each volunteer exactly once.
+      // Cancelling releases approved seats and closes open applications.
       const affected = await Application.find({
         eventId: event._id,
         status: { $in: ['pending', 'approved'] },
@@ -395,7 +461,7 @@ async function updateEvent(req, res, next) {
           })
         )
       );
-    } else if (scheduleChanged) {
+    } else if (scheduleChanged && event.approvalStatus === 'approved') {
       const affected = await Application.find({
         eventId: event._id,
         status: { $in: ['pending', 'approved'] },
@@ -418,14 +484,22 @@ async function updateEvent(req, res, next) {
     const populated = await Event.findById(event._id).populate(populate);
 
     await audit.record(req, {
-      action: 'event.update',
+      action: needsReview ? 'event.resubmit' : 'event.update',
       entityType: 'Event',
       entityId: event._id,
-      summary: `Updated "${event.title}"`,
-      meta: { status: event.status, scheduleChanged },
+      summary: needsReview
+        ? `Edited "${event.title}" and sent it for re-approval`
+        : `Updated "${event.title}"`,
+      meta: { status: event.status, approvalStatus: event.approvalStatus, scheduleChanged },
     });
 
-    return res.json({ success: true, message: 'Event updated.', data: shapeEvent(populated) });
+    return res.json({
+      success: true,
+      message: needsReview
+        ? 'Event updated. Because participation details changed, it is pending administrator approval again.'
+        : 'Event updated.',
+      data: shapeEvent(populated),
+    });
   } catch (error) {
     next(error);
   }

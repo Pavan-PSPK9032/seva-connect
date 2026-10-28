@@ -116,8 +116,13 @@ async function overview(req, res, next) {
       User.countDocuments({ role: 'admin' }),
       User.countDocuments({ accountStatus: 'suspended' }),
       NGO.countDocuments({}),
-      NGO.countDocuments({ verified: true }),
-      NGO.countDocuments({ verificationRequested: true, verified: false }),
+      NGO.countDocuments({ $or: [{ approvalStatus: 'approved' }, { approvalStatus: { $exists: false }, $or: [{ approved: true }, { verified: true }] }] }),
+      NGO.countDocuments({
+        $or: [
+          { approvalStatus: 'pending' },
+          { approvalStatus: { $exists: false }, verificationRequested: true, verified: { $ne: true } },
+        ],
+      }),
       Event.aggregate([{ $group: { _id: '$status', count: { $sum: 1 } } }]),
       Application.aggregate([{ $group: { _id: '$status', count: { $sum: 1 } } }]),
       Application.aggregate([
@@ -789,6 +794,12 @@ async function listNGOs(req, res, next) {
     if (req.query.verified === 'true') filter.verified = true;
     if (req.query.verified === 'false') filter.verified = false;
     if (req.query.requested === 'true') filter.verificationRequested = true;
+    if (
+      req.query.approvalStatus &&
+      ['pending', 'approved', 'rejected', 'changes_requested', 'suspended'].includes(req.query.approvalStatus)
+    ) {
+      filter.approvalStatus = req.query.approvalStatus;
+    }
     if (req.query.status && ['active', 'suspended'].includes(req.query.status)) {
       filter.status = req.query.status;
     }
@@ -885,6 +896,8 @@ async function getNGO(req, res, next) {
 }
 
 // PATCH /api/admin/ngos/:id/verify
+// Legacy endpoint kept for compatibility: `verified: true` approves the
+// organisation, `false` rejects it.
 async function setNGOVerified(req, res, next) {
   try {
     const ngo = await NGO.findById(req.params.id);
@@ -892,20 +905,27 @@ async function setNGOVerified(req, res, next) {
       return res.status(404).json({ success: false, message: 'NGO not found.' });
     }
 
-    const previous = ngo.verified;
-    ngo.verified = req.body.verified;
-
-    // Re-applying the same decision would send a duplicate notification.
-    if (previous === ngo.verified) {
+    const approve = req.body.verified === true;
+    const previous = ngo.approvalStatus || (ngo.verified ? 'approved' : 'pending');
+    const nextStatus = approve ? 'approved' : 'rejected';
+    if (previous === nextStatus) {
       return res.json({
         success: true,
-        message: ngo.verified ? 'NGO is already verified.' : 'NGO is already unverified.',
+        message: `NGO is already ${nextStatus}.`,
         data: ngo,
       });
     }
 
-    ngo.verifiedAt = ngo.verified ? new Date() : null;
+    ngo.approvalStatus = nextStatus;
+    ngo.approved = approve;
+    ngo.verified = approve;
+    ngo.approvedAt = approve ? new Date() : null;
+    ngo.verifiedAt = approve ? new Date() : null;
+    ngo.approvedBy = approve ? req.user._id : null;
+    ngo.reviewedAt = new Date();
+    ngo.reviewedBy = req.user._id;
     ngo.verificationRequested = false;
+    if (!approve) ngo.rejectionReason = String(req.body.note || '').trim().slice(0, 1000);
     if (typeof req.body.note === 'string') ngo.verificationNote = req.body.note;
     await ngo.save();
 
@@ -913,25 +933,104 @@ async function setNGOVerified(req, res, next) {
       await notify({
         recipient: ngo.createdBy,
         type: 'system',
-        title: ngo.verified ? 'Organisation verified' : 'Verification revoked',
-        message: ngo.verified
-          ? `${ngo.organizationName} is now a verified organisation on Seva Connect.`
-          : `Verification for ${ngo.organizationName} was revoked. Please contact support.`,
+        title: approve ? 'Organisation approved' : 'Organisation submission rejected',
+        message: approve
+          ? `${ngo.organizationName} is now approved on Seva Connect. You can publish events for volunteers.`
+          : `Your submission for ${ngo.organizationName} was rejected.${
+              ngo.rejectionReason ? ` Reason: ${ngo.rejectionReason}` : ''
+            } You can update the details and resubmit.`,
         link: '/my-ngo',
       });
     }
 
     await audit.record(req, {
-      action: ngo.verified ? 'ngo.verified' : 'ngo.unverified',
+      action: approve ? 'ngo.approved' : 'ngo.rejected',
       entityType: 'NGO',
       entityId: ngo._id,
-      summary: `${ngo.verified ? 'Verified' : 'Unverified'} ${ngo.organizationName}`,
-      meta: { previous, note: req.body.note || '' },
+      summary: `${approve ? 'Approved' : 'Rejected'} ${ngo.organizationName}`,
+      meta: { previous, reason: ngo.rejectionReason || '' },
     });
 
     return res.json({
       success: true,
-      message: ngo.verified ? 'NGO verified.' : 'Verification revoked.',
+      message: approve ? 'NGO approved.' : 'NGO rejected.',
+      data: ngo,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+// PATCH /api/admin/ngos/:id/approval
+// Explicit approval endpoint used by the review panel.
+async function reviewNGO(req, res, next) {
+  try {
+    const { decision, reason } = req.body;
+    const ngo = await NGO.findById(req.params.id);
+    if (!ngo) {
+      return res.status(404).json({ success: false, message: 'NGO not found.' });
+    }
+
+    if (decision === 'approved') {
+      ngo.approvalStatus = 'approved';
+      ngo.approved = true;
+      ngo.verified = true;
+      ngo.approvedAt = new Date();
+      ngo.verifiedAt = new Date();
+      ngo.approvedBy = req.user._id;
+      ngo.rejectionReason = '';
+    } else {
+      ngo.approvalStatus = decision === 'changes_requested' ? 'changes_requested' : 'rejected';
+      ngo.approved = false;
+      ngo.verified = false;
+      ngo.approvedAt = null;
+      ngo.verifiedAt = null;
+      ngo.approvedBy = null;
+      ngo.rejectionReason = String(reason || '').trim().slice(0, 1000);
+      if (!ngo.rejectionReason) {
+        return res.status(400).json({
+          success: false,
+          message: 'A reason is required when rejecting or returning a submission.',
+        });
+      }
+    }
+
+    ngo.reviewedAt = new Date();
+    ngo.reviewedBy = req.user._id;
+    ngo.verificationRequested = false;
+    await ngo.save();
+
+    if (ngo.createdBy) {
+      const approved = ngo.approvalStatus === 'approved';
+      await notify({
+        recipient: ngo.createdBy,
+        type: 'system',
+        title: approved ? 'Organisation approved' : 'Organisation submission needs attention',
+        message: approved
+          ? `${ngo.organizationName} is approved. You can now publish events for volunteers.`
+          : `Your submission for ${ngo.organizationName} was ${
+              ngo.approvalStatus === 'changes_requested' ? 'returned for corrections' : 'rejected'
+            }. Reason: ${ngo.rejectionReason}`,
+        link: '/my-ngo',
+      });
+    }
+
+    await audit.record(req, {
+      action: `ngo.${ngo.approvalStatus}`,
+      entityType: 'NGO',
+      entityId: ngo._id,
+      summary: `${ngo.approvalStatus} ${ngo.organizationName}`,
+      meta: { reason: ngo.rejectionReason || '' },
+    });
+
+    return res.json({
+      success: true,
+      message:
+        ngo.approvalStatus === 'approved'
+          ? 'NGO approved.'
+          : ngo.approvalStatus === 'changes_requested'
+            ? 'Submission returned for corrections.'
+            : 'NGO rejected.',
       data: ngo,
     });
   } catch (error) {
@@ -1001,9 +1100,17 @@ async function listEvents(req, res, next) {
 
     if (
       req.query.status &&
-      ['draft', 'upcoming', 'ongoing', 'completed', 'cancelled', 'archived'].includes(req.query.status)
+      ['draft', 'pending_approval', 'upcoming', 'ongoing', 'completed', 'cancelled', 'archived'].includes(
+        req.query.status
+      )
     ) {
       filter.status = req.query.status;
+    }
+    if (
+      req.query.approvalStatus &&
+      ['pending', 'approved', 'rejected', 'changes_requested'].includes(req.query.approvalStatus)
+    ) {
+      filter.approvalStatus = req.query.approvalStatus;
     }
     if (req.query.ngoId) filter.ngoId = req.query.ngoId;
 
@@ -1077,9 +1184,12 @@ async function setEventStatus(req, res, next) {
 
     if (status === 'upcoming') {
       event.approved = true;
+      event.approvalStatus = 'approved';
       event.status = 'upcoming';
       event.approvedAt = event.approvedAt || new Date();
       event.approvedBy = req.user._id;
+      event.reviewedAt = new Date();
+      event.reviewedBy = req.user._id;
     } else {
       event.status = status;
     }
@@ -1156,8 +1266,101 @@ async function setEventStatus(req, res, next) {
   }
 }
 
-/* --------------------------- Application oversight -------------------------- */
+// PATCH /api/admin/events/:id/approval
+// Approve, reject or return an event submission. Rejections and correction
+// requests require a reason that the organisation can act on.
+async function reviewEvent(req, res, next) {
+  try {
+    const { decision, reason } = req.body;
+    const event = await Event.findById(req.params.id).populate({
+      path: 'ngoId',
+      select: 'organizationName createdBy approvalStatus status',
+    });
+    if (!event) {
+      return res.status(404).json({ success: false, message: 'Event not found.' });
+    }
+    if (!event.ngoId) {
+      return res.status(400).json({ success: false, message: 'The owning organisation no longer exists.' });
+    }
 
+    if (decision === 'approved') {
+      if (event.ngoId.approvalStatus !== 'approved' && event.ngoId.approvalStatus !== undefined) {
+        return res.status(400).json({
+          success: false,
+          message: 'The organisation must be approved before its events can be published.',
+        });
+      }
+      if (event.ngoId.status === 'suspended') {
+        return res.status(400).json({
+          success: false,
+          message: 'The organisation is suspended and its events cannot be published.',
+        });
+      }
+      event.approvalStatus = 'approved';
+      event.approved = true;
+      event.approvedAt = new Date();
+      event.approvedBy = req.user._id;
+      event.rejectionReason = '';
+      event.status = 'upcoming';
+    } else {
+      const note = String(reason || '').trim().slice(0, 1000);
+      if (!note) {
+        return res.status(400).json({
+          success: false,
+          message: 'A reason is required when rejecting or returning an event.',
+        });
+      }
+      event.approvalStatus = decision === 'changes_requested' ? 'changes_requested' : 'rejected';
+      event.approved = false;
+      event.approvedAt = null;
+      event.approvedBy = null;
+      event.rejectionReason = note;
+      event.status = 'draft';
+    }
+
+    event.reviewedAt = new Date();
+    event.reviewedBy = req.user._id;
+    await event.save();
+
+    if (event.ngoId.createdBy) {
+      const approved = event.approvalStatus === 'approved';
+      await notify({
+        recipient: event.ngoId.createdBy,
+        type: approved ? 'event_published' : 'system',
+        title: approved ? 'Event approved' : 'Event submission needs attention',
+        message: approved
+          ? `"${event.title}" is approved and now visible to volunteers.`
+          : `"${event.title}" was ${
+              event.approvalStatus === 'changes_requested' ? 'returned for corrections' : 'rejected'
+            }. Reason: ${event.rejectionReason}`,
+        link: '/my-ngo',
+      });
+    }
+
+    await audit.record(req, {
+      action: `event.${event.approvalStatus}`,
+      entityType: 'Event',
+      entityId: event._id,
+      summary: `${event.approvalStatus} "${event.title}"`,
+      meta: { reason: event.rejectionReason || '' },
+    });
+
+    return res.json({
+      success: true,
+      message:
+        event.approvalStatus === 'approved'
+          ? 'Event approved and published.'
+          : event.approvalStatus === 'changes_requested'
+            ? 'Event returned for corrections.'
+            : 'Event rejected.',
+      data: event,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/* --------------------------- Application oversight -------------------------- */
 // GET /api/admin/applications
 async function listApplications(req, res, next) {
   try {
@@ -1293,7 +1496,10 @@ async function reports(req, res, next) {
       ]),
       Event.countDocuments({ createdAt: dateRange }),
       NGO.countDocuments({ createdAt: dateRange }),
-      NGO.countDocuments({ createdAt: dateRange, verified: true }),
+      NGO.countDocuments({
+        createdAt: dateRange,
+        $or: [{ approvalStatus: 'approved' }, { approvalStatus: { $exists: false }, verified: true }],
+      }),
       User.aggregate([
         { $match: { createdAt: dateRange } },
         {
@@ -1657,8 +1863,10 @@ module.exports = {
   listNGOs,
   getNGO,
   setNGOVerified,
+  reviewNGO,
   setNGOStatus,
   listEvents,
+  reviewEvent,
   setEventStatus,
   listApplications,
   listAudit,

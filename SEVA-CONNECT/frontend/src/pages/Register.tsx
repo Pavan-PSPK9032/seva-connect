@@ -30,9 +30,9 @@ const registerSchema = z
 type RegisterForm = z.infer<typeof registerSchema>;
 
 function homeForRole(role: Role): string {
-  if (role === 'admin') return '/admin';
-  if (role === 'ngo') return '/my-ngo';
-  return '/dashboard';
+  if (role === 'admin') return '/admin/dashboard';
+  if (role === 'ngo') return '/organization/dashboard';
+  return '/volunteer/dashboard';
 }
 
 export default function Register() {
@@ -81,13 +81,7 @@ export default function Register() {
       const status = (err as { response?: { status?: number } })?.response?.status;
       const code = (err as { response?: { data?: { code?: string } } })?.response?.data?.code;
 
-      // An existing but unverified account continues on the verification screen
-      // instead of being told to log in.
-      if (code === 'EMAIL_NOT_VERIFIED') {
-        toast('info', 'Verify your email', message);
-        navigate('/verify-email', { replace: true, state: { email: values.email } });
-        return;
-      }
+      // Email verification removed
 
       // Form values stay in react-hook-form, so a retry does not require
       // retyping anything after a mail outage.
@@ -142,7 +136,7 @@ export default function Register() {
         <div className="mt-5 flex items-start gap-2 rounded-xl bg-primary-50 px-3 py-2 text-xs text-primary-800 dark:bg-primary-500/10 dark:text-primary-200">
           <MailCheck className="mt-0.5 h-4 w-4 shrink-0" />
           <p>
-            Create your account to start volunteering or managing your NGO. You can join events after NGOs are approved by the admin.
+            Create your account to start volunteering or managing your NGO. Organizations are reviewed by an administrator before they appear publicly.
           </p>
         </div>
 

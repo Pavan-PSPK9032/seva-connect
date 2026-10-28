@@ -10,6 +10,7 @@ const User = require('../models/User');
 const NGO = require('../models/NGO');
 const Event = require('../models/Event');
 const Application = require('../models/Application');
+const { approvedNGOClause, approvedEventClause } = require('../utils/approval');
 
 function monthKey(date) {
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
@@ -51,11 +52,11 @@ async function getPublicStats(req, res, next) {
       hoursAgg,
     ] = await Promise.all([
       User.countDocuments({ role: 'volunteer', accountStatus: 'active' }),
-      NGO.countDocuments({}),
-      NGO.countDocuments({ verified: true }),
-      NGO.countDocuments({ verified: false }),
-      Event.countDocuments({ status: 'upcoming' }),
-      Event.countDocuments({ status: 'ongoing' }),
+      NGO.countDocuments({ $and: [{ status: { $ne: 'suspended' } }, approvedNGOClause()] }),
+      NGO.countDocuments({ $and: [{ status: { $ne: 'suspended' } }, approvedNGOClause()] }),
+      NGO.countDocuments({ approvalStatus: 'pending' }),
+      Event.countDocuments({ $and: [approvedEventClause(), { status: 'upcoming' }] }),
+      Event.countDocuments({ $and: [approvedEventClause(), { status: 'ongoing' }] }),
       Event.countDocuments({ status: 'completed' }),
       Application.countDocuments({ status: { $in: ['pending', 'approved', 'completed'] } }),
       Application.aggregate([
@@ -109,9 +110,9 @@ async function getImpact(req, res, next) {
       topNGORows,
     ] = await Promise.all([
       User.countDocuments({ role: 'volunteer', accountStatus: 'active' }),
-      NGO.countDocuments({}),
-      NGO.countDocuments({ verified: true }),
-      Event.countDocuments({ status: { $in: ['upcoming', 'ongoing'] } }),
+      NGO.countDocuments({ $and: [{ status: { $ne: 'suspended' } }, approvedNGOClause()] }),
+      NGO.countDocuments({ $and: [{ status: { $ne: 'suspended' } }, approvedNGOClause()] }),
+      Event.countDocuments({ $and: [approvedEventClause(), { status: { $in: ['upcoming', 'ongoing'] } }] }),
       Event.countDocuments({ status: 'completed' }),
       Application.countDocuments({ status: { $in: ['pending', 'approved', 'completed'] } }),
       Application.countDocuments({ status: 'completed' }),
@@ -120,7 +121,7 @@ async function getImpact(req, res, next) {
         { $match: { status: 'completed' } },
         { $group: { _id: null, hours: { $sum: '$hoursCredited' } } },
       ]),
-      Event.aggregate([{ $group: { _id: '$status', count: { $sum: 1 } } }]),
+      Event.aggregate([{ $match: approvedEventClause() }, { $group: { _id: '$status', count: { $sum: 1 } } }]),
       Application.aggregate([
         { $match: { status: 'completed' } },
         { $lookup: { from: 'events', localField: 'eventId', foreignField: '_id', as: 'event' } },

@@ -29,6 +29,39 @@ const eventSchema = new mongoose.Schema({
     required: [true, 'Event location is required'],
     trim: true,
   },
+  // Optional poster image and category for the public listing.
+  image: {
+    type: String,
+    trim: true,
+    maxlength: [500, 'Image URL cannot exceed 500 characters'],
+    default: '',
+  },
+  category: {
+    type: String,
+    trim: true,
+    maxlength: [80, 'Category cannot exceed 80 characters'],
+    default: '',
+  },
+  // Contact details and participation instructions shown on the event page.
+  contactEmail: {
+    type: String,
+    trim: true,
+    lowercase: true,
+    maxlength: [200, 'Contact email cannot exceed 200 characters'],
+    default: '',
+  },
+  contactPhone: {
+    type: String,
+    trim: true,
+    maxlength: [30, 'Contact phone cannot exceed 30 characters'],
+    default: '',
+  },
+  instructions: {
+    type: String,
+    trim: true,
+    maxlength: [2000, 'Instructions cannot exceed 2000 characters'],
+    default: '',
+  },
   online: {
     type: Boolean,
     default: false,
@@ -75,6 +108,11 @@ const eventSchema = new mongoose.Schema({
     default: 'pending_approval',
   },
   // Admin approval
+  approvalStatus: {
+    type: String,
+    enum: ['pending', 'approved', 'rejected', 'changes_requested'],
+    default: 'pending',
+  },
   approved: {
     type: Boolean,
     default: false,
@@ -88,6 +126,25 @@ const eventSchema = new mongoose.Schema({
     ref: 'User',
     default: null,
   },
+  rejectionReason: {
+    type: String,
+    trim: true,
+    maxlength: [1000, 'Reason cannot exceed 1000 characters'],
+    default: '',
+  },
+  submittedAt: {
+    type: Date,
+    default: Date.now,
+  },
+  reviewedAt: {
+    type: Date,
+    default: null,
+  },
+  reviewedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null,
+  },
   createdAt: {
     type: Date,
     default: Date.now,
@@ -95,7 +152,9 @@ const eventSchema = new mongoose.Schema({
 });
 
 eventSchema.index({ status: 1, date: 1 });
+eventSchema.index({ approvalStatus: 1, status: 1, date: 1 });
 eventSchema.index({ ngoId: 1 });
 eventSchema.index({ causes: 1 });
+eventSchema.index({ category: 1 });
 
 module.exports = mongoose.model('Event', eventSchema);

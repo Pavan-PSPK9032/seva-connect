@@ -1,19 +1,16 @@
 /**
- * Authentication controllers — registration with email OTP verification,
- * login, logout/session invalidation, and password recovery.
+ * Authentication controllers — direct registration, login, logout/session
+ * invalidation, and password recovery.
  *
  * Passwords are hashed by the User model before save; tokens are signed JWTs.
- * OTPs are generated and hashed in services/otpService.js and are never
- * returned in a response, written to logs, or sent to the browser.
+ * New accounts are created immediately; there is no email OTP step.
  */
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const User = require('../models/User');
-const EmailVerification = require('../models/EmailVerification');
 const signToken = require('../utils/generateToken');
-const { normalizeEmail, isEmailVerified } = require('../utils/email');
+const { normalizeEmail } = require('../utils/email');
 const { sendMail, smtpConfigured } = require('../services/mailer');
-const { issueOtp, verifyOtp } = require('../services/otpService');
 const googleAuth = require('../services/googleAuth');
 const { notify } = require('../services/notificationService');
 const { getPlatformSettings } = require('../services/settingsService');
@@ -23,177 +20,12 @@ const BCRYPT_ROUNDS = 10;
 const DUPLICATE_EMAIL_MESSAGE =
   'An account with this email already exists. Please log in or reset your password.';
 
-const GENERIC_RESEND_MESSAGE =
-  'If that address still needs verification, a new code has been sent.';
-
-function verificationPayload(email, extra = {}) {
-  return {
-    success: true,
-    verificationRequired: true,
-    email,
-    expiresInSeconds: 5 * 60,
-    resendAfterSeconds: 60,
-    ...extra,
-  };
-}
-
-/**
- * Map otpService.issueOtp statuses onto HTTP responses. Shared by registration
- * and resend so both behave identically.
- *
- * Returns a response body, or null when the OTP was sent.
- */
-function deliveryErrorResponse(status) {
-  if (status === 'cooldown') {
-    return {
-      status: 429,
-      body: {
-        success: false,
-        code: 'OTP_COOLDOWN',
-        message: 'Please wait before requesting another code.',
-      },
-    };
-  }
-  if (status === 'rate_limited') {
-    return {
-      status: 429,
-      body: {
-        success: false,
-        code: 'OTP_RATE_LIMITED',
-        message: 'Too many verification codes requested. Please try again later.',
-      },
-    };
-  }
-  if (status === 'delivery_failed') {
-    return {
-      status: 503,
-      body: {
-        success: false,
-        code: 'EMAIL_DELIVERY_FAILED',
-        message:
-          'We could not send the verification email right now. Please try again in a few minutes.',
-      },
-    };
-  }
-  return null;
-}
-
 function cleanList(value, limit = 20) {
   if (!Array.isArray(value)) return [];
   return value
     .map((item) => String(item).trim())
     .filter(Boolean)
     .slice(0, limit);
-}
-
-/**
- * Build the data that waits with the OTP challenge. The password is hashed
- * here, so even the pending record never contains the plaintext password.
- */
-async function buildPendingRegistration(body) {
-  return {
-    name: String(body.name || '').trim(),
-    passwordHash: await bcrypt.hash(String(body.password), BCRYPT_ROUNDS),
-    role: body.role === 'ngo' ? 'ngo' : 'volunteer',
-    phone: String(body.phone || '').trim(),
-    skills: cleanList(body.skills),
-    interests: cleanList(body.interests),
-    profileImage: String(body.profileImage || '').trim(),
-    termsAcceptedAt: body.acceptTerms ? new Date() : null,
-  };
-}
-
-/**
- * Newest challenge that still carries pending registration data. It is looked
- * up even when consumed, so a resend/recovery after an expired or locked code
- * can reuse the original form data instead of asking for it again.
- */
-function findPendingChallenge(email) {
-  return EmailVerification.findOne({
-    email,
-    purpose: 'registration',
-    pendingRegistration: { $ne: null },
-  }).sort({ createdAt: -1 });
-}
-
-/**
- * Create the verified account from the data held by the OTP challenge.
- *
- * The User unique-email index is the final arbiter: if another request wins the
- * race, the duplicate-key error is translated into a sign-in for an unverified
- * record or a clear 409 for an already-verified one. No partially-created user
- * is ever left behind.
- */
-async function createAccountFromPending(email, pending) {
-  const existing = await User.findOne({ email });
-
-  if (existing) {
-    if (isEmailVerified(existing)) return { status: 'taken' };
-    const verified = await User.findOneAndUpdate(
-      { _id: existing._id, emailVerified: { $ne: true } },
-      { $set: { emailVerified: true, emailVerifiedAt: new Date() } },
-      { new: true }
-    );
-    return verified ? { status: 'ok', user: verified, created: false } : { status: 'taken' };
-  }
-
-  const user = new User({
-    name: pending.name,
-    email,
-    password: pending.passwordHash,
-    role: pending.role === 'ngo' ? 'ngo' : 'volunteer',
-    phone: pending.phone || '',
-    skills: pending.skills || [],
-    interests: pending.interests || [],
-    profileImage: pending.profileImage || '',
-    emailVerified: true,
-    emailVerifiedAt: new Date(),
-    termsAcceptedAt: pending.termsAcceptedAt || new Date(),
-    authProvider: 'password',
-  });
-  // The pending record already holds a bcrypt hash; do not hash it twice.
-  user.$locals.passwordAlreadyHashed = true;
-
-  try {
-    await user.save();
-    return { status: 'ok', user, created: true };
-  } catch (error) {
-    if (!error || error.code !== 11000) throw error;
-
-    // A concurrent verifier (or a Google signup) inserted the address first.
-    const raced = await User.findOne({ email });
-    if (!raced) throw error;
-    if (isEmailVerified(raced)) return { status: 'taken' };
-
-    const verified = await User.findOneAndUpdate(
-      { _id: raced._id, emailVerified: { $ne: true } },
-      { $set: { emailVerified: true, emailVerifiedAt: new Date() } },
-      { new: true }
-    );
-    return verified ? { status: 'ok', user: verified, created: false } : { status: 'taken' };
-  }
-}
-
-/** Issue the challenge and turn service statuses into a response. */
-async function deliverOtp({ email, pendingRegistration, user, ip, res }) {
-  const issued = await issueOtp({ email, pendingRegistration, user, ip });
-
-  if (issued.status === 'sent') return null;
-
-  const failure = deliveryErrorResponse(issued.status);
-  if (failure) {
-    return res.status(failure.status).json({
-      ...failure.body,
-      ...(issued.retryAfter ? { retryAfter: issued.retryAfter } : {}),
-    });
-  }
-
-  return res.status(503).json({
-    success: false,
-    code: 'EMAIL_DELIVERY_FAILED',
-    message:
-      'We could not send the verification email right now. Please try again in a few minutes.',
-  });
 }
 
 // POST /api/auth/register
@@ -251,164 +83,6 @@ async function register(req, res, next) {
   }
 }
 
-// POST /api/auth/verify-email
-// Atomically consumes the OTP, creates (or verifies) the account exactly once,
-// then issues a token.
-async function verifyEmail(req, res, next) {
-  try {
-    const email = normalizeEmail(req.body.email);
-    const otp = String(req.body.otp || '').trim();
-
-    const result = await verifyOtp({ email, otp, purpose: 'registration' });
-
-    if (result.status === 'expired') {
-      return res.status(400).json({
-        success: false,
-        code: 'OTP_EXPIRED',
-        message: 'That code has expired. Please request a new one.',
-      });
-    }
-
-    if (result.status === 'locked') {
-      return res.status(429).json({
-        success: false,
-        code: 'OTP_LOCKED',
-        message: 'Too many incorrect attempts. Please request a new code.',
-      });
-    }
-
-    if (result.status !== 'verified') {
-      return res.status(400).json({
-        success: false,
-        code: 'OTP_INVALID',
-        message: 'That code is not valid. Please check it and try again.',
-        attemptsRemaining: result.attemptsRemaining,
-      });
-    }
-
-    let account;
-    let created = false;
-
-    if (result.pendingRegistration) {
-      const outcome = await createAccountFromPending(email, result.pendingRegistration);
-      if (outcome.status === 'taken') {
-        return res.status(409).json({
-          success: false,
-          code: 'EMAIL_TAKEN',
-          message: DUPLICATE_EMAIL_MESSAGE,
-        });
-      }
-      account = outcome.user;
-      created = outcome.created;
-    } else {
-      // Legacy flow: the User document already existed (unverified), so only
-      // the verification flag has to be flipped.
-      const verified = await User.findOneAndUpdate(
-        { email, emailVerified: { $ne: true } },
-        { $set: { emailVerified: true, emailVerifiedAt: new Date() } },
-        { new: true }
-      );
-      // Already verified (for example the same code was replayed after success):
-      // treat it as a normal login rather than an error.
-      account = verified || (await User.findOne({ email }));
-      created = Boolean(verified);
-    }
-
-    if (!account) {
-      return res.status(404).json({
-        success: false,
-        code: 'ACCOUNT_NOT_FOUND',
-        message: 'We could not find that registration. Please sign up again.',
-      });
-    }
-
-    if (account.accountStatus === 'suspended') {
-      return res.status(403).json({
-        success: false,
-        code: 'ACCOUNT_SUSPENDED',
-        message: 'This account is suspended. Please contact support.',
-      });
-    }
-
-    account.lastLoginAt = new Date();
-    await account.save({ validateBeforeSave: false });
-
-    if (created) {
-      void notify({
-        recipient: account._id,
-        type: 'system',
-        title: 'Email verified',
-        message: 'Your email address is verified. Welcome to Seva Connect!',
-        link: '/dashboard',
-      });
-    }
-
-    return res.json({
-      success: true,
-      message: 'Email verified. Welcome to Seva Connect!',
-      token: signToken({ id: account._id }, account),
-      user: account,
-    });
-  } catch (error) {
-    next(error);
-  }
-}
-
-// POST /api/auth/resend-verification
-async function resendVerification(req, res, next) {
-  try {
-    const email = normalizeEmail(req.body.email);
-
-    if (!smtpConfigured()) {
-      return res.status(503).json({
-        success: false,
-        code: 'EMAIL_NOT_CONFIGURED',
-        message:
-          'Email delivery is not configured on this server, so verification codes cannot be sent yet.',
-      });
-    }
-
-    const user = await User.findOne({ email });
-
-    // Generic answer for unknown, suspended or already-verified addresses so
-    // this endpoint cannot be used to enumerate accounts.
-    if (user && (isEmailVerified(user) || user.accountStatus === 'suspended')) {
-      return res.json({ success: true, message: GENERIC_RESEND_MESSAGE });
-    }
-
-    let pendingRegistration = null;
-    if (!user) {
-      const pending = await findPendingChallenge(email);
-      if (!pending) {
-        return res.json({ success: true, message: GENERIC_RESEND_MESSAGE });
-      }
-      pendingRegistration = pending.pendingRegistration
-        ? pending.pendingRegistration.toObject()
-        : null;
-      if (!pendingRegistration) {
-        return res.json({ success: true, message: GENERIC_RESEND_MESSAGE });
-      }
-    }
-
-    const failed = await deliverOtp({
-      email,
-      user: user || undefined,
-      pendingRegistration,
-      ip: req.ip,
-      res,
-    });
-    if (failed) return failed;
-
-    return res.json(
-      verificationPayload(email, {
-        message: 'A new verification code has been sent. Older codes no longer work.',
-      })
-    );
-  } catch (error) {
-    next(error);
-  }
-}
-
 // POST /api/auth/login
 async function login(req, res, next) {
   try {
@@ -438,16 +112,6 @@ async function login(req, res, next) {
     }
 
     // Only reveal verification state after the password has been confirmed.
-    if (!isEmailVerified(user)) {
-      return res.status(403).json({
-        success: false,
-        code: 'EMAIL_NOT_VERIFIED',
-        verificationRequired: true,
-        email: user.email,
-        message: 'Please verify your email address before logging in.',
-      });
-    }
-
     user.lastLoginAt = new Date();
     await user.save({ validateBeforeSave: false });
 
@@ -597,8 +261,8 @@ async function googleSignIn(req, res, next) {
       });
     }
 
-    // Google already verified the address, so no email OTP is required.
-    if (!isEmailVerified(user)) {
+    // Google already verified the address.
+    if (user.emailVerified !== true) {
       user.emailVerified = true;
       user.emailVerifiedAt = new Date();
     }
@@ -827,8 +491,6 @@ async function resetPassword(req, res, next) {
 
 module.exports = {
   register,
-  verifyEmail,
-  resendVerification,
   login,
   logout,
   googleSignIn,

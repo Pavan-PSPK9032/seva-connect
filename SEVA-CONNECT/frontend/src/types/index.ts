@@ -31,14 +31,25 @@ export interface NGO {
   description: string;
   location: string;
   contactEmail: string;
+  contactPhone?: string;
+  address?: string;
   causes: string[];
   website?: string;
   logo?: string;
   verified: boolean;
+  approved?: boolean;
+  approvalStatus?: 'pending' | 'approved' | 'rejected' | 'changes_requested' | 'suspended';
   verificationRequested?: boolean;
   verificationNote?: string;
+  rejectionReason?: string;
   verifiedAt?: string | null;
+  approvedAt?: string | null;
+  reviewedAt?: string | null;
+  submittedAt?: string | null;
   status?: 'active' | 'suspended';
+  registrationNumber?: string;
+  registrationDetails?: string;
+  documents?: Array<{ name?: string; url: string }>;
   events?: EventItem[];
   stats?: {
     completedEvents: number;
@@ -58,9 +69,15 @@ export interface EventItem {
   location: string;
   online?: boolean;
   causes?: string[];
+  image?: string;
+  category?: string;
+  contactEmail?: string;
+  contactPhone?: string;
+  instructions?: string;
   ngoId: string | { _id: string; organizationName?: string; verified?: boolean };
   ngoName?: string;
   ngoVerified?: boolean;
+  ngoApproved?: boolean;
   ngoLogo?: string;
   requiredVolunteers?: number;
   registeredVolunteers?: number;
@@ -68,6 +85,8 @@ export interface EventItem {
   eligibility?: string;
   applicationDeadline?: string | null;
   status?: string;
+  approvalStatus?: 'pending' | 'approved' | 'rejected' | 'changes_requested';
+  rejectionReason?: string;
   createdAt?: string;
   matchScore?: number;
   matchReasons?: string[];
@@ -77,10 +96,13 @@ export interface EventItem {
     organizationName: string;
     description?: string;
     verified?: boolean;
+    approved?: boolean;
+    approvalStatus?: string;
     logo?: string;
     location?: string;
     website?: string;
     contactEmail?: string;
+    contactPhone?: string;
     causes?: string[];
   };
 }
@@ -124,6 +146,7 @@ export interface Application {
   ngoId: string;
   status: ApplicationStatus;
   coverNote?: string;
+  decisionNote?: string;
   hoursCredited: number;
   decidedAt?: string | null;
   completedAt?: string | null;

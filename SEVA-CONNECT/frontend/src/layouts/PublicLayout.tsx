@@ -27,7 +27,7 @@ const TITLES: [RegExp, string][] = [
   [/^\/chatbot/, 'Seva AI assistant | Seva Connect'],
   [/^\/login/, 'Log in | Seva Connect'],
   [/^\/register/, 'Create an account | Seva Connect'],
-  [/^\/verify-email/, 'Verify your email | Seva Connect'],
+  [/^\/verify-email/, 'Seva Connect'],
   [/^\/forgot-password/, 'Reset password | Seva Connect'],
   [/^\/reset-password/, 'Choose a new password | Seva Connect'],
 ];

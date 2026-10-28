@@ -13,6 +13,7 @@ const Application = require('../models/Application');
 const Event = require('../models/Event');
 const NGO = require('../models/NGO');
 const { canManageNGO } = require('../utils/permissions');
+const { ngoIsApproved, eventIsApproved } = require('../utils/approval');
 const { notify } = require('../services/notificationService');
 const { issueForApplication } = require('../services/certificateService');
 const audit = require('../services/auditService');
@@ -77,12 +78,15 @@ async function apply(req, res, next) {
     if (event.status !== 'upcoming' && event.status !== 'ongoing') {
       return res.status(400).json({ success: false, message: 'This opportunity is no longer accepting applications.' });
     }
-    if (!event.approved) {
-      return res.status(400).json({ success: false, message: 'This opportunity is pending admin approval.' });
+    if (!eventIsApproved(event)) {
+      return res.status(400).json({ success: false, message: 'This opportunity is pending administrator approval.' });
     }
     const ngo = await NGO.findById(event.ngoId);
-    if (ngo && !ngo.approved) {
-      return res.status(400).json({ success: false, message: 'This NGO is pending admin approval.' });
+    if (!ngo || !ngoIsApproved(ngo)) {
+      return res.status(400).json({
+        success: false,
+        message: 'This organisation is not approved or is currently suspended.',
+      });
     }
     if (event.applicationDeadline && new Date(event.applicationDeadline).getTime() < Date.now()) {
       return res.status(400).json({ success: false, message: 'The application deadline for this opportunity has passed.' });
@@ -96,7 +100,9 @@ async function apply(req, res, next) {
     if (existing && existing.status !== 'withdrawn' && existing.status !== 'rejected') {
       return res.status(409).json({
         success: false,
-        message: `You already have a ${existing.status} application for this opportunity.`,
+        code: 'ALREADY_REQUESTED',
+        status: existing.status,
+        message: `You already have a ${existing.status} participation request for this opportunity.`,
       });
     }
 
@@ -105,6 +111,7 @@ async function apply(req, res, next) {
       // Re-open the withdrawn/rejected record instead of creating a duplicate.
       existing.status = 'pending';
       existing.coverNote = coverNote || '';
+      existing.decisionNote = '';
       existing.decidedBy = null;
       existing.decidedAt = null;
       existing.withdrawnAt = null;
@@ -264,7 +271,7 @@ async function getForEvent(req, res, next) {
 // PATCH /api/applications/:id/status
 async function decide(req, res, next) {
   try {
-    const { status, hoursCredited } = req.body;
+    const { status, hoursCredited, note } = req.body;
     if (!DECIDABLE.includes(status)) {
       return res.status(400).json({ success: false, message: 'Status must be approved, rejected or completed.' });
     }
@@ -288,6 +295,7 @@ async function decide(req, res, next) {
     }
 
     const decidedAt = new Date();
+    const decisionNote = status === 'rejected' ? String(note || '').trim().slice(0, 500) : '';
     const claimed = await Application.findOneAndUpdate(
       { _id: application._id, status: application.status },
       {
@@ -295,6 +303,7 @@ async function decide(req, res, next) {
           status,
           decidedBy: req.user._id,
           decidedAt,
+          decisionNote,
           ...(status === 'completed'
             ? { completedAt: decidedAt, hoursCredited: Math.min(1000, Math.max(0, Number(hoursCredited) || 0)) }
             : {}),
@@ -345,7 +354,9 @@ async function decide(req, res, next) {
       rejected: {
         type: 'application_rejected',
         title: 'Application not accepted',
-        message: `Your application for "${event.title}" was not accepted this time.`,
+        message: decisionNote
+          ? `Your application for "${event.title}" was not accepted. Reason: ${decisionNote}`
+          : `Your application for "${event.title}" was not accepted this time.`,
       },
       completed: {
         type: 'application_completed',
@@ -378,4 +389,43 @@ async function decide(req, res, next) {
   }
 }
 
-module.exports = { apply, getMine, withdraw, getForEvent, decide };
+// GET /api/applications/received
+// Participation requests across every event owned by the caller's NGOs.
+async function getReceived(req, res, next) {
+  try {
+    const ngoFilter = req.user.role === 'admin' ? {} : { createdBy: req.user._id };
+    const ngos = await NGO.find(ngoFilter).select('_id');
+    const ngoIds = ngos.map((ngo) => ngo._id);
+
+    const filter = { ngoId: { $in: ngoIds } };
+    const status = String(req.query.status || '').trim();
+    if (status) {
+      const wanted = status.split(',').filter((value) => Application.STATUSES.includes(value));
+      if (wanted.length) filter.status = { $in: wanted };
+    }
+    if (req.query.eventId && /^[a-f\d]{24}$/i.test(String(req.query.eventId))) {
+      filter.eventId = req.query.eventId;
+    }
+
+    const items = await Application.find(filter)
+      .populate(volunteerPopulate)
+      .populate(eventPopulate)
+      .sort({ createdAt: -1 })
+      .limit(500);
+
+    const summary = items.reduce(
+      (acc, item) => {
+        acc.total += 1;
+        acc[item.status] = (acc[item.status] || 0) + 1;
+        return acc;
+      },
+      { total: 0, pending: 0, approved: 0, rejected: 0, withdrawn: 0, completed: 0, cancelled: 0 }
+    );
+
+    return res.json({ success: true, data: items.map(shape), summary });
+  } catch (error) {
+    next(error);
+  }
+}
+
+module.exports = { apply, getMine, withdraw, getForEvent, getReceived, decide };

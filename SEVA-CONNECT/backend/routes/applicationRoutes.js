@@ -26,6 +26,12 @@ const decideRules = [
   body('status')
     .isIn(['approved', 'rejected', 'completed'])
     .withMessage('Status must be approved, rejected or completed'),
+  body('note')
+    .optional({ values: 'falsy' })
+    .isString()
+    .trim()
+    .isLength({ max: 500 })
+    .withMessage('Note cannot exceed 500 characters'),
   body('hoursCredited')
     .optional({ values: 'falsy' })
     .isInt({ min: 0, max: 1000 })
@@ -36,6 +42,13 @@ const decideRules = [
 router.post('/', protect, authorize('volunteer'), applyRules, validate, applicationController.apply);
 router.get('/mine', protect, applicationController.getMine);
 router.patch('/:id/withdraw', protect, idParam, validate, applicationController.withdraw);
+
+router.get(
+  '/received',
+  protect,
+  authorize('ngo', 'admin'),
+  applicationController.getReceived
+);
 
 router.get(
   '/event/:eventId',

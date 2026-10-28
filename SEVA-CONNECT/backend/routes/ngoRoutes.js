@@ -21,7 +21,14 @@ const ngoBody = ({ update = false } = {}) =>
         body('causes').optional().isArray(),
         body('website').optional().trim(),
         body('logo').optional().trim(),
+        body('contactPhone').optional({ values: 'falsy' }).trim().isLength({ max: 30 }),
+        body('address').optional({ values: 'falsy' }).trim().isLength({ max: 300 }),
+        body('registrationNumber').optional({ values: 'falsy' }).trim().isLength({ max: 120 }),
+        body('registrationDetails').optional({ values: 'falsy' }).trim().isLength({ max: 1000 }),
+        body('documents').optional().isArray({ max: 10 }).withMessage('Documents must be a list'),
         body('verified').optional().isBoolean(),
+        body('approved').optional().isBoolean(),
+        body('approvalStatus').optional().isIn(['pending', 'approved', 'rejected', 'changes_requested', 'suspended']),
       ]
     : [
         body('organizationName').trim().notEmpty().withMessage('Organization name is required').isLength({ max: 100 }),
@@ -31,6 +38,11 @@ const ngoBody = ({ update = false } = {}) =>
         body('causes').optional().isArray().withMessage('Causes must be a list'),
         body('website').optional().trim(),
         body('logo').optional().trim(),
+        body('contactPhone').optional({ values: 'falsy' }).trim().isLength({ max: 30 }),
+        body('address').optional({ values: 'falsy' }).trim().isLength({ max: 300 }),
+        body('registrationNumber').optional({ values: 'falsy' }).trim().isLength({ max: 120 }),
+        body('registrationDetails').optional({ values: 'falsy' }).trim().isLength({ max: 1000 }),
+        body('documents').optional().isArray({ max: 10 }).withMessage('Documents must be a list'),
       ];
 
 const idParam = [param('id').isMongoId().withMessage('Invalid NGO id')];
