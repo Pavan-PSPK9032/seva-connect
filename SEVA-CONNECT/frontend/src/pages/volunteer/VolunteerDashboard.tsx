@@ -60,15 +60,22 @@ export default function VolunteerDashboard() {
 
       if (appRes.status === 'fulfilled') {
         setApplications(appRes.value.data ?? []);
-        setSummary(appRes.value.summary ?? null);
+        const summaryData = appRes.value.summary as ApplicationSummary | Record<string, number> | undefined;
+        if (summaryData && typeof summaryData === 'object' && 'total' in summaryData) {
+          setSummary(summaryData as ApplicationSummary);
+        } else {
+          setSummary(null);
+        }
       } else {
         setApplications([]);
       }
 
       if (certRes.status === 'fulfilled') {
         const map: Record<string, string> = {};
-        (certRes.value.data ?? []).forEach((cert) => {
-          if (cert.applicationId) map[cert.applicationId] = cert.code;
+        (certRes.value.data ?? []).forEach((cert: any) => {
+          const appId = cert.applicationId || cert.application?._id;
+          const code = cert.code || cert.certificateId;
+          if (appId && code) map[String(appId)] = code;
         });
         setCertificates(map);
       }

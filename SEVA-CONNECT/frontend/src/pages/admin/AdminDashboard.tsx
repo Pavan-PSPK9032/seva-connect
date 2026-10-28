@@ -7,8 +7,6 @@ import {
   ShieldCheck,
   Users,
   Activity,
-  FileText,
-  Bell,
 } from 'lucide-react';
 import { apiGet, apiErrorMessage } from '../../services/api';
 import type { AdminOverview } from '../../types';
@@ -22,7 +20,12 @@ export default function AdminDashboard() {
     setError(null);
     try {
       const res = await apiGet<AdminOverview>('/admin/overview');
-      setOverview(res.data ?? null);
+      const data = res.data as unknown;
+      if (Array.isArray(data)) {
+        setOverview(null);
+      } else {
+        setOverview((data as AdminOverview) ?? null);
+      }
     } catch (err) {
       setError(apiErrorMessage(err, 'Could not load admin overview.'));
     }
@@ -49,7 +52,10 @@ export default function AdminDashboard() {
     );
   }
 
-  const stats = overview.stats || {};
+  const users = overview.users || ({} as AdminOverview['users']);
+  const ngos = overview.ngos || ({} as AdminOverview['ngos']);
+  const events = overview.events || ({} as AdminOverview['events']);
+  const applications = overview.applications || ({} as AdminOverview['applications']);
 
   return (
     <div className="space-y-8 p-6 lg:p-8">
@@ -62,10 +68,10 @@ export default function AdminDashboard() {
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard icon={<Users className="h-5 w-5" />} label="Total Users" value={stats.users || 0} tone="primary" />
-        <StatCard icon={<Building2 className="h-5 w-5" />} label="Organizations" value={stats.ngos || 0} tone="navy" />
-        <StatCard icon={<CalendarDays className="h-5 w-5" />} label="Events" value={stats.events || 0} tone="emerald" />
-        <StatCard icon={<ClipboardList className="h-5 w-5" />} label="Applications" value={stats.applications || 0} tone="amber" />
+        <StatCard icon={<Users className="h-5 w-5" />} label="Total Users" value={users.total || 0} tone="primary" />
+        <StatCard icon={<Building2 className="h-5 w-5" />} label="Organizations" value={ngos.total || 0} tone="navy" />
+        <StatCard icon={<CalendarDays className="h-5 w-5" />} label="Events" value={events.total || 0} tone="emerald" />
+        <StatCard icon={<ClipboardList className="h-5 w-5" />} label="Applications" value={applications.total || 0} tone="amber" />
       </div>
 
       <div className="grid gap-6 lg:grid-cols-3">
@@ -127,19 +133,19 @@ export default function AdminDashboard() {
           <ul className="mt-4 space-y-3">
             <li className="flex items-center justify-between">
               <span className="text-sm text-slate-600 dark:text-slate-300">Verified Users</span>
-              <span className="font-semibold text-navy-800 dark:text-white">{stats.verifiedUsers || 0}</span>
+              <span className="font-semibold text-navy-800 dark:text-white">{users.verified || 0}</span>
             </li>
             <li className="flex items-center justify-between">
               <span className="text-sm text-slate-600 dark:text-slate-300">Volunteers</span>
-              <span className="font-semibold text-navy-800 dark:text-white">{stats.volunteers || 0}</span>
+              <span className="font-semibold text-navy-800 dark:text-white">{users.volunteers || 0}</span>
             </li>
             <li className="flex items-center justify-between">
               <span className="text-sm text-slate-600 dark:text-slate-300">NGO Accounts</span>
-              <span className="font-semibold text-navy-800 dark:text-white">{stats.ngoUsers || 0}</span>
+              <span className="font-semibold text-navy-800 dark:text-white">{users.ngoUsers || 0}</span>
             </li>
             <li className="flex items-center justify-between">
               <span className="text-sm text-slate-600 dark:text-slate-300">Suspended Users</span>
-              <span className="font-semibold text-navy-800 dark:text-white">{stats.suspendedUsers || 0}</span>
+              <span className="font-semibold text-navy-800 dark:text-white">{users.suspended || 0}</span>
             </li>
           </ul>
         </section>
