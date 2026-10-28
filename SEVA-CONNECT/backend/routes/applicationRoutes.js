@@ -40,6 +40,9 @@ const decideRules = [
 ];
 
 router.post('/', protect, authorize('volunteer'), applyRules, validate, applicationController.apply);
+router.get('/', protect, (req, res) => {
+  return res.status(400).json({ success: false, message: 'Use /api/applications/mine for your applications.' });
+});
 router.get('/mine', protect, applicationController.getMine);
 router.patch('/:id/withdraw', protect, idParam, validate, applicationController.withdraw);
 
